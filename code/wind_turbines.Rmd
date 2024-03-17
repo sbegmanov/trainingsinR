@@ -1,0 +1,87 @@
+---
+title: "Wind Turbines"
+author: "SB"
+date: "2024-03-17"
+output: html_document
+---
+
+```{r }
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+
+```{r }
+library(tidyverse)
+## based on https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-10-27/readme.md
+
+turbines <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-10-27/wind-turbine.csv")
+
+```
+
+## Including Plots
+
+```{r }
+turbines %>% count(commissioning_date, sort = TRUE)
+
+turbines %>% transmute(commissioning_date = parse_number(commissioning_date)) %>% 
+  count(commissioning_date, sort = TRUE)
+
+turbines %>% names()
+turbines %>% count(model, sort = TRUE)
+turbines %>% count(province_territory, sort = TRUE)
+turbines %>% filter(is.na(turbine_rated_capacity_k_w))
+  
+```
+
+```{r}
+turbines_df <- turbines %>% 
+  transmute(turbine_capacity = turbine_rated_capacity_k_w,
+                       rotor_diameter_m,
+                       hub_height_m,
+                       commissioning_date = parse_number(commissioning_date),
+                       province_territory = fct_lump(province_territory, 8),
+                       model = fct_lump(model, 10)) %>% 
+  filter(!is.na(turbine_capacity)) %>% 
+  mutate_if(is.character, factor)
+
+turbines_df %>% names()
+```
+
+```{r}
+turbines_df %>% 
+  select(turbine_capacity:commissioning_date) %>% 
+  pivot_longer(rotor_diameter_m:commissioning_date) %>% 
+  ggplot(aes(turbine_capacity, value)) +
+  geom_point(alpha = 0.8) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~name, scales = "free_y") +
+  labs(y = NULL)
+
+```
+
+```{r}
+
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

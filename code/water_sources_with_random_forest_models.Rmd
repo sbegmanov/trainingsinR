@@ -1,0 +1,210 @@
+---
+title: "water_sources_with_random_forest_models"
+author: "SB"
+date: "2024-03-16"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, cache = TRUE, cache.lazy = FALSE, warning = FALSE,
+                      message = FALSE, echo = TRUE)
+```
+
+```{r}
+library(tidyverse)
+
+water_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-05-04/water.csv")
+
+```
+
+```{r}
+water_raw %>% count(status_id)
+
+water_raw %>% 
+  filter(status_id %in% c("y", "n")) %>% 
+  ggplot(aes(lon_deg, lat_deg, color = status_id)) +
+  geom_point(alpha = 0.2)
+
+unique(water_raw$country_name)
+water_raw %>% count(country_name,sort = TRUE)
+
+```
+
+```{r}
+water_raw %>% 
+  filter(country_name == "Sierra Leone",
+         lat_deg > 0, lat_deg < 15, lon_deg < 0,
+         status_id %in% c("y", "n")) %>% 
+  ggplot(aes(lon_deg, lat_deg, color = status_id)) +
+  geom_point(alpha = 0.2) +
+  coord_fixed() +
+  guides(color = guide_legend(override.aes = list(alpha = 1)))
+```
+
+
+
+```{r}
+water <- water_raw %>% 
+  filter(country_name == "Sierra Leone",
+         lat_deg > 0, lat_deg < 15, lon_deg < 0,
+         status_id %in% c("y", "n")) %>% 
+  select(-country_name, -status, -report_date)
+
+water %>% count(pay, sort = TRUE)
+water %>% count(water_tech, sort = TRUE)
+water %>% count(facility_type, sort = TRUE)
+water %>% count(installer, sort = TRUE)
+water %>% count(water_source, sort = TRUE)
+```
+
+```{r}
+water <- water_raw %>% 
+  filter(country_name == "Sierra Leone",
+         lat_deg > 0, lat_deg < 15, lon_deg < 0,
+         status_id %in% c("y", "n")) %>% 
+  mutate(pay = case_when(str_detect(pay, "^No") ~ "no",
+                         str_detect(pay, "^Yes") ~ "yes",
+                         is.na(pay) ~ pay,
+                         TRUE ~ "it's comoplicated")) %>% 
+  select(-country_name, -status, -report_date) %>% 
+  mutate_if(is.character, as.factor)
+```
+
+```{r}
+water %>% 
+  ggplot(aes(install_year, y = ..density.., fill = status_id)) +
+  geom_histogram(position = "identity", alpha = 0.5) +
+  labs(fill = "Water availible ?")
+```
+
+```{r}
+water %>% 
+  ggplot(aes(y = pay, fill = status_id)) +
+  geom_bar(position = "fill") + 
+  labs(fill = "Water avaible ?")
+```
+
+### Build a model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+water_split <- initial_split(water, strata = status_id)
+water_train <- training(water_split)
+water_test <- testing(water_split)
+
+set.seed(234)
+water_folds <- vfold_cv(water_train, strata = status_id)
+water_folds
+
+```
+
+```{r}
+usemodels::use_ranger(status_id ~ ., data = water_train)
+
+# to check NA values
+water_train %>% select(install_year)
+```
+
+```{r}
+library(themis)
+
+ranger_recipe <- 
+  recipe(formula = status_id ~ ., data = water_train) %>% 
+  update_role(row_id, new_role = "id") %>% 
+  step_unknown(all_nominal_predictors()) %>% 
+  step_other(all_nominal_predictors(), threshold = 0.03) %>% 
+  step_impute_linear(install_year) %>% 
+  step_downsample(status_id)
+
+ranger_spec <- 
+  rand_forest(trees = 1000) %>% 
+  set_mode("classification") %>% 
+  set_engine("ranger") 
+
+ranger_workflow <- 
+  workflow() %>% 
+  add_recipe(ranger_recipe) %>% 
+  add_model(ranger_spec) 
+
+doParallel::registerDoParallel()
+set.seed(74403)
+ranger_tune <-
+  fit_resamples(ranger_workflow, 
+                resamples = water_folds,
+                control = control_resamples(save_pred = TRUE))
+```
+
+### Explore results
+```{r}
+collect_metrics(ranger_tune)
+```
+
+```{r}
+collect_predictions(ranger_tune) %>% 
+  group_by(id) %>% 
+  roc_curve(status_id, .pred_n) %>% 
+  autoplot()
+```
+
+```{r}
+conf_mat_resampled(ranger_tune, tidy = FALSE) %>% 
+  autoplot()
+```
+
+```{r}
+final_fitted <- last_fit(ranger_workflow, water_split)
+collect_metrics(final_fitted)
+```
+
+```{r}
+collect_predictions(final_fitted) %>% 
+  conf_mat(status_id, .pred_class) %>% 
+  autoplot()
+```
+
+```{r}
+final_fitted$.workflow[[1]] %>% write_rds()
+
+# test with prediction
+predict(final_fitted$.workflow[[1]], water_test[45, ])
+```
+
+```{r}
+library(vip)
+
+imp_data <- ranger_recipe %>% prep() %>% bake(new_data = NULL) %>% 
+  select(-row_id)
+
+ranger_spec %>% 
+  set_engine("ranger", importance = "permutation") %>% 
+  fit(status_id ~ ., data = imp_data) %>% 
+  vip(geom = "point")
+
+```
+
+
+```{r}
+imp_data %>% 
+  select(status_id, pay, water_tech, installer) %>% 
+  pivot_longer(pay:installer, names_to = "feature", values_to = "value") %>% 
+  ggplot(aes(y = value, fill = status_id)) +
+  geom_bar(position = "fill") +
+  facet_grid(rows = vars(feature), scales = "free_y", space = "free_y") +
+  labs(fill = "Water availible ?",
+       x = "% of water sources",
+       y = NULL) +
+  scale_fill_brewer(type = "qual")  +
+  scale_x_continuous(labels = scales::percent)
+```
+
+
+
+
+
+
+
+
+
+
+

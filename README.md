@@ -1,2 +1,2 @@
 # trainingsinR
-Julia Silge trainings
+Julia Silge (youtube channel)
