@@ -1,4 +1,3 @@
-
 ```{r}
 library(tidyverse)
 
@@ -22,7 +21,9 @@ polling_places %>%
        y = "Number of polling places per state")
   
 ```
+
 ## Measuring changes
+
 ```{r}
 by_state <- 
   polling_places %>% 
@@ -59,11 +60,3 @@ us_states %>%
   labs(fill = "Total change")
 
 ```
-
-
-
-
-
-
-
-

@@ -1,0 +1,69 @@
+```{r}
+library(tidyverse)
+
+food_consumption <- readr::read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-02-18/food_consumption.csv")
+```
+
+```{r}
+library(countrycode)
+
+food_consumption %>%
+  mutate(continent = countrycode(country, 
+                                 origin = "country.name",
+                                 destination = "continent")) %>% count(continent)
+
+food <- food_consumption %>%
+  mutate(continent = countrycode(country, 
+                                 origin = "country.name",
+                                 destination = "continent")) %>%
+  select(-co2_emmission) %>% 
+  pivot_wider(names_from = food_category,
+              values_from = consumption) %>% 
+  janitor::clean_names() %>% 
+  mutate(asia = case_when(continent == "Asia" ~ "Asia",
+                          TRUE ~ "Other")) %>% 
+  select(-country, -continent) %>% 
+  mutate_if(is.character, factor)
+```
+
+```{r}
+library(GGally)
+
+ggscatmat(food, columns = 1:11, color = "asia", alpha = 0.6)
+```
+## Tune hyperparameter
+```{r}
+library(tidymodels)
+set.seed(1234)
+
+food_boot <- bootstraps(food, times = 30)
+
+rf_spec <- rand_forest(mode = "classification",
+            mtry = tune(),
+            trees = 1000,
+            min_n = tune()) %>% 
+  set_engine("ranger")
+
+doParallel::registerDoParallel()
+
+rf_grid <- tune_grid(
+  rf_spec,
+  asia ~ .,
+  resamples = food_boot
+)
+
+rf_grid %>% collect_metrics()
+
+rf_grid %>% show_best(metric = "roc_auc")
+
+```
+
+
+
+
+
+
+
+
+
+
