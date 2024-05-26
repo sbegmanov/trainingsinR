@@ -1,0 +1,37 @@
+```{r}
+library(tidyverse)
+
+gdpr_raw <- readr::read_tsv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-04-21/gdpr_violations.tsv")
+
+gdpr_raw %>% 
+  mutate(date = lubridate::mdy(date))
+  
+```
+
+```{r}
+gdpr_raw %>% 
+  ggplot(aes(price + 1)) +
+  geom_histogram() +
+  scale_x_log10(labels = scales::dollar_format(prefix = "€")) +
+  labs(
+    x = "GDPR fine (EUR)"
+  )
+```
+
+```{r}
+gdpr_raw %>% 
+  transmute(id,
+            price,
+            country = name,
+            article_violated,
+            articles = str_extract_all(article_violated, 
+                                       "Art. [:digit:]+|Art.[:digit:]+")) %>% 
+  mutate(total_articles = map_int(articles, length)) %>% 
+  unnest(articles) %>% #count(articles, sort = TRUE)
+  add_count(articles) %>% 
+  filter(n > 10) %>% 
+  select(-n)
+
+# time: 13:13
+```
+
