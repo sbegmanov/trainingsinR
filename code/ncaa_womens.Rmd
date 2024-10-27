@@ -1,0 +1,163 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+library(tidyverse)
+tournament <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-10-06/tournament.csv")
+```
+
+```{r}
+tournament %>% 
+  group_by(seed) %>% 
+  summarise(exp_wins = mean(tourney_w, na.rm = TRUE)) %>% 
+  ggplot(aes(seed, exp_wins)) +
+  geom_point(alpha = 0.8, size = 3) +
+  labs(
+    y = "tournament wins(mean)"
+  )
+```
+
+```{r}
+library(splines)
+
+tournament %>% 
+  ggplot(aes(seed, tourney_w)) +
+  geom_bin2d(bindwidth = c(1, 1), alpha = 0.8) +
+  scale_fill_gradient(low = "gray85", high = "midnightblue") +
+  geom_smooth(se = FALSE, method = lm, color = "black", formula = y ~ ns(x, df = 4)) +
+  labs(
+    fill = "number of \nteams",
+    y = "tournament wins"
+  )
+```
+
+```{r}
+plot_smoother <- function(deg_free) {
+  p <- ggplot(tournament, aes(seed, tourney_w)) +
+    geom_bin2d(binwidth = c(1, 1), alpha = 0.8) +
+    scale_fill_gradient(low = "gray85", high = "midnightblue") +
+    geom_smooth(
+      method = lm, se = FALSE, color = "black",
+      formula = y ~ ns(x, df = deg_free)
+    ) +
+    labs(
+      fill = "number of \nteams", y = "tournament wins",
+      title = paste(deg_free, "spline terms")
+    )
+  print(p)
+}
+walk(c(2, 4, 8, 10, 15), plot_smoother)
+
+```
+### Build a model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+tourney_split <- tournament %>% 
+  filter(!is.na(seed)) %>% 
+  initial_split(strata = seed)
+
+tourney_train <- training(tourney_split)
+tourney_test <- testing(tourney_split)
+```
+
+```{r}
+set.seed(234)
+tourney_folds <- bootstraps(tourney_train)
+```
+
+```{r}
+tourney_rec <- recipe(tourney_w ~ seed, data = tourney_train) %>% 
+  step_ns(seed, deg_free = tune("seed_splines"))
+```
+
+```{r}
+lm_spec <- linear_reg() %>%
+  set_engine("lm")
+
+tourney_wf <- workflow() %>% 
+  add_recipe(tourney_rec) %>% 
+  add_model(lm_spec)
+```
+
+```{r}
+doParallel::registerDoParallel()
+save_preds <- control_grid(save_pred = TRUE)
+
+spline_grid <- tibble(seed_splines = c(1:3, 5, 7, 10))
+
+spline_rs <- tune_grid(
+  tourney_wf,
+  resamples = tourney_folds,
+  grid = spline_grid,
+  control = save_preds
+)
+```
+## Evaluate model
+```{r}
+collect_metrics(spline_rs)
+autoplot(spline_rs)
+
+select_best(spline_rs, metric = "rmse")
+select_by_pct_loss(spline_rs, metric = "rmse", limit = 5, seed_splines)
+select_by_one_std_err(spline_rs, metric = "rmse", seed_splines)
+```
+
+```{r}
+collect_metrics(spline_rs) %>% 
+  ggplot(aes(seed_splines, mean, color = .metric)) +
+  geom_line(linewidth = 1.5, alpha = 0.5) +
+  geom_point(linewidth = 3) +
+  facet_wrap(~.metric, ncol = 1, scales = "free_y") +
+  labs(
+    x = "degrees of freedom",
+    y = NULL
+  ) +
+  theme(legend.position = "none")
+
+
+tournament %>% 
+  ggplot(aes(seed, tourney_w)) +
+  geom_bin2d(bindwidth = c(1, 1), alpha = 0.8) +
+  scale_fill_gradient(low = "gray85", high = "midnightblue") +
+  geom_smooth(se = FALSE, method = lm, color = "black", size = 1.5, formula = y ~ ns(x, df = 4)) +
+  geom_smooth(se = FALSE, method = lm, color = "black", lty = 2, formula = y ~ ns(x, df = 10)) +
+  labs(
+    fill = "number of \nteams",
+    y = "tournament wins"
+  )
+```
+
+```{r}
+final_wf <- finalize_workflow(tourney_wf, tibble(seed_splines = 3))
+tourney_fit <- fit(final_wf, tourney_train)
+
+predict(tourney_fit, tourney_test)
+```
+
+```{r}
+tourney_test %>% 
+  bind_cols(predict(tourney_fit, tourney_test)) %>% 
+  metrics(tourney_w, .pred)
+```
+
+```{r}
+predict(tourney_fit, new_data = tibble(seed = 1:16))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+

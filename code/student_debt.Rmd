@@ -1,0 +1,56 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+library(tidyverse)
+student_debt <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-02-09/student_debt.csv")
+
+```
+
+```{r}
+student_debt %>% 
+  ggplot(aes(year, loan_debt_pct, colour = race)) +
+  geom_point(size = 2.5, alpha = 0.8) +
+  geom_smooth(method = "lm", se = FALSE) +
+  labs(
+    x = NULL,
+    y = "% of families with student loan debt",
+    color = NULL
+  )
+```
+### Build a model
+```{r}
+library(tidymodels)
+
+lm_spec <- linear_reg() %>% 
+  set_engine("lm")
+```
+
+```{r}
+lm_fit <- lm_spec %>% 
+  fit(loan_debt_pct ~ year * race, data = student_debt)
+
+tidy(lm_fit)
+```
+### Explore results
+```{r}
+new_points <- crossing(
+  race = c("Black", "Hispanic", "White"),
+  year = 1990:2020
+)
+augment(lm_fit, new_data = new_points)
+```
+
+```{r}
+augment(lm_fit, new_data = new_points) %>% 
+  ggplot(aes(year, .pred, color = race)) +
+  geom_line(linewidth = 1.2, alpha = 0.7) +
+  labs(
+    x = NULL,
+    y = "% of families with student loan debt",
+    color = NULL
+  )
+```
+

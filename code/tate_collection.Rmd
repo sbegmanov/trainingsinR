@@ -1,0 +1,170 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+library(tidyverse)
+artwork <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-01-12/artwork.csv")
+
+glimpse(artwork)
+artwork %>% count(medium, sort = TRUE)
+```
+
+```{r}
+artwork %>% 
+  ggplot(aes(year)) +
+  geom_histogram(alpha = 0.8, fill = "midnightblue")
+```
+
+```{r}
+tate_df <- artwork %>% 
+  filter(year > 1750) %>% 
+  select(year, medium) %>% 
+  na.omit() %>% 
+  arrange(year)
+```
+
+```{r}
+library(tidytext)
+tate_df %>% 
+  unnest_tokens(word, medium) %>% 
+  count(word, sort = TRUE)
+```
+### Build a model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+art_split <- initial_split(tate_df, strata = year)
+art_train <- training(art_split)
+art_test <- testing(art_split)
+
+set.seed(234)
+art_folds <- vfold_cv(art_train, strata = year)
+```
+
+```{r}
+library(textrecipes)
+
+art_rec <- recipe(year ~ medium, data = art_train) %>% 
+  step_tokenize(medium) %>% 
+  step_stopwords(medium) %>% 
+  step_tokenfilter(medium, max_tokens = 500) %>% 
+  step_tfidf(medium)
+```
+
+```{r}
+sparse_bp <- hardhat::default_recipe_blueprint(composition = "dgCMatrix")
+
+lasso_spec <- linear_reg(penalty = tune(), mixture = 1) %>% 
+  set_engine("glmnet")
+
+art_wf <- workflow() %>% 
+  add_recipe(art_rec, blueprint = sparse_bp) %>% 
+  add_model(lasso_spec)
+```
+
+```{r}
+lambda_grid <- grid_regular(penalty(range = c(-3, 0)), levels = 20)
+```
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(1234)
+lasso_rs <- tune_grid(
+  art_wf,
+  resamples = art_folds,
+  grid = lambda_grid
+)
+```
+### Evaluate model
+```{r}
+autoplot(lasso_rs)
+```
+
+```{r}
+show_best(lasso_rs, metric = "rmse")
+```
+
+```{r}
+best_rmse <- select_best(lasso_rs, metric = "rmse")
+final_lasso <- finalize_workflow(art_wf, best_rmse)
+```
+
+```{r}
+art_final <- last_fit(final_lasso, art_split)
+collect_metrics(art_final)
+```
+
+```{r}
+library(vip)
+
+art_vip <- extract_fit_parsnip(art_final$.workflow[[1]]) %>% 
+  vi()
+
+art_vip %>% 
+  group_by(Sign) %>% 
+  slice_max(abs(Importance), n = 20) %>% 
+  ungroup() %>% 
+  mutate(
+    Variable = str_remove(Variable, "tfidf_medium_"),
+    Importance = abs(Importance),
+    Variable = fct_reorder(Variable, Importance),
+    Sign = if_else(Sign == "POS", "More in later art", "More in earlier art")
+  ) %>% 
+  ggplot(aes(Importance, Variable, fill = Sign)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(~Sign, scales = "free") +
+  labs(y = NULL)
+```
+
+```{r}
+collect_predictions(art_final) %>% 
+  ggplot(aes(year, .pred)) +
+  geom_abline(lty = 2, color = "gray50", size = 1.2) +
+  geom_point(size = 1.5, alpha = 0.3, color = "midnightblue") +
+  coord_fixed()
+```
+
+```{r}
+misclassified <- collect_predictions(art_final) %>% 
+  bind_cols(art_test %>% select(medium)) %>% 
+  filter(abs(year - .pred) > 100)
+
+misclassified %>% 
+  unnest_tokens(word, medium) %>% 
+  count(word, sort = TRUE)
+
+misclassified %>% arrange(year)
+misclassified %>% arrange(-year)
+```
+
+```{r}
+augment(art_final) %>% 
+  ggplot(aes(.pred, .resid)) +
+  geom_hline(yintercept = 0, lty = 2, color = "gray50", size = 1.2) +
+  geom_point(size = 1.5, alpha = 0.3, color = "midnightblue") +
+  geom_smooth(color = "black")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

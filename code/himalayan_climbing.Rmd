@@ -1,7 +1,14 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
 ```{r}
 library(tidyverse)
 
 members <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-09-22/members.csv")
+
+skimr::skim(members)
 ```
 
 ```{r}
@@ -13,7 +20,7 @@ members %>%
   ) %>% 
   pivot_longer(died:success, names_to = "outcome", values_to = "percent") %>% 
   ggplot(aes(year, percent, colour = outcome)) +
-  geom_line(alpha = 0.7, size = 1.5) +
+  geom_line(alpha = 0.7, linewidth = 1.5) +
   scale_y_continuous(labels = scales::percent_format()) +
   labs(
     x = NULL,
@@ -54,6 +61,9 @@ members %>%
 ```
 
 ```{r}
+
+members %>% count(peak_name, sort = TRUE)
+
 members %>% 
   filter(!is.na(peak_name)) %>% 
   mutate(peak_name = fct_lump(peak_name, prop = 0.05)) %>% 
@@ -67,6 +77,8 @@ members %>%
 ```
 
 ```{r}
+members %>% count(season, died)
+
 members %>% 
   filter(season != "Unknown") %>% 
   count(season, died) %>% 
@@ -107,41 +119,43 @@ set.seed(123)
 members_split <- initial_split(members_df, strata = died)
 members_train <- training(members_split)
 members_test <- testing(members_split)
-```
 
-```{r}
-set.seed(123)
+set.seed(345)
 members_folds <- vfold_cv(members_train, strata = died)
 ```
 
 ```{r}
 library(themis)
 
+members_train %>% count(citizenship, sort = TRUE)
+members_train %>% count(died)
+
 members_rec <- recipe(died ~ ., data = members_train) %>% 
   step_impute_median(age) %>% 
   step_other(peak_id, citizenship) %>% 
-  step_dummy(all_nominal(), ~died) %>% 
+  step_dummy(all_nominal(), -died) %>% 
   step_smote(died)
+
+#members_rec %>% prep() %>% bake(new_data = NULL) %>% count(died)
+
+members_wf <- workflow() %>% 
+  add_recipe(members_rec)
 ```
 
 ```{r}
 glm_spec <- logistic_reg() %>% 
   set_engine("glm")
-```
 
-```{r}
 rf_spec <- rand_forest(trees = 1000) %>% 
   set_mode("classification") %>% 
   set_engine("ranger")
 ```
 
 ```{r}
-members_wf <- workflow() %>% 
-  add_recipe(members_rec)
+members_metrics <- metric_set(roc_auc, accuracy, sensitivity, specificity)
 ```
 
 ```{r}
-members_metrics <- metric_set(roc_auc, accuracy, sensitivity, specificity)
 
 doParallel::registerDoParallel()
 glm_rs <- members_wf %>% 
@@ -151,9 +165,7 @@ glm_rs <- members_wf %>%
     metrics = members_metrics,
     control = control_resamples(save_pred = TRUE)
   )
-```
 
-```{r}
 rf_rs <- members_wf %>% 
   add_model(rf_spec) %>% 
   fit_resamples(
@@ -164,12 +176,60 @@ rf_rs <- members_wf %>%
 ```
 ### Evaluate model
 ```{r}
-
+collect_metrics(glm_rs)
+collect_metrics(rf_rs)
 ```
 
+```{r}
+glm_rs %>% conf_mat_resampled()
+rf_rs %>% conf_mat_resampled()
+```
 
+```{r}
+glm_rs %>% 
+  collect_predictions() %>% 
+  group_by(id) %>% 
+  roc_curve(died, .pred_died) %>% 
+  autoplot()
 
+rf_rs %>% 
+  collect_predictions() %>% 
+  group_by(id) %>% 
+  roc_curve(died, .pred_died) %>% 
+  autoplot()
+```
 
+```{r}
+members_final <- members_wf %>% 
+  add_model(glm_spec) %>% 
+  last_fit(members_split)
+
+collect_metrics(members_final)
+
+collect_predictions(members_final) %>% 
+  conf_mat(died, .pred_clas)
+```
+
+```{r}
+members_final %>% 
+  pull(.workflow) %>% 
+  pluck(1) %>% 
+  tidy(exponentiate = TRUE) %>% 
+  arrange(estimate) %>% 
+  kable(digits = 3)
+
+members_final %>% 
+  pull(.workflow) %>% 
+  pluck(1) %>% 
+  tidy() %>% 
+  filter(term != "(Intercept)") %>% 
+  ggplot(aes(estimate, fct_reorder(term, estimate))) +
+  geom_vline(xintercept = 0, color = "gray50", lty = 2, size = 1.2) +
+  geom_errorbar(aes(xmin = estimate - std.error,
+                    xmax = estimate + std.error),
+                width = 0.2, alpha = 0.7) +
+  geom_point()
+```
 
 
 

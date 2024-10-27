@@ -1,13 +1,14 @@
-
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-10-27/readme.md
 ```{r }
 library(tidyverse)
-## based on https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-10-27/readme.md
-
 turbines <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-10-27/wind-turbine.csv")
 ```
-
 ## Including Plots
-
 ```{r }
 turbines %>% count(commissioning_date, sort = TRUE)
 
@@ -45,12 +46,11 @@ turbines_df %>%
   labs(y = NULL) +
   scale_fill_gradient(high = "cyan3")
 ```
-
 ## Build a model
 ```{r}
 library(tidymodels)
-set.seed(123)
 
+set.seed(123)
 wind_split <- initial_split(turbines_df, strata = turbine_capacity)
 wind_train <- training(wind_split)
 wind_test <- testing(wind_split)
@@ -60,7 +60,6 @@ wind_folds <- vfold_cv(wind_train, strata = turbine_capacity)
 ```
 
 ```{r}
-# model
 tree_spec <- decision_tree(
   cost_complexity = tune(),
   tree_depth = tune(),
@@ -75,8 +74,8 @@ tree_grid <- grid_regular(cost_complexity(), tree_depth(), min_n(), levels = 4)
 
 ```{r}
 doParallel::registerDoParallel()
-set.seed(345)
 
+set.seed(345)
 tree_rs <- tune_grid(
   tree_spec,
   turbine_capacity ~ .,
@@ -85,8 +84,7 @@ tree_rs <- tune_grid(
   metrics = metric_set(rmse, rsq, mae, mape)
 )
 ```
-
-## explore results
+## Explore results
 ```{r}
 collect_metrics(tree_rs)
 autoplot(tree_rs) + theme_light()
@@ -101,12 +99,12 @@ show_best(tree_rs, metric = "rmse")
 ```{r}
 final_tree <- finalize_model(tree_spec, select_best(tree_rs, metric = "rmse"))
 ```
-## Fitting
+
 ```{r}
 final_fit <- fit(final_tree, turbine_capacity ~ ., wind_train)
 final_rs <- last_fit(final_tree, turbine_capacity ~ ., wind_split)
 ```
-## Predicting on new data
+### Predicting on new data
 ```{r}
 predict(final_fit, wind_train[44, ])
 predict(final_rs$.workflow[[1]], wind_train[44, ])
@@ -122,6 +120,7 @@ final_fit %>%
 
 ```{r}
 library(parttree)
+
 ex_fit <- fit(final_tree, turbine_capacity ~ rotor_diameter_m + commissioning_date, wind_train)
 
 wind_train %>% 
