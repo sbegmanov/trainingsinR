@@ -1,0 +1,120 @@
+---
+title: "ceo_departures"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+
+departures_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-04-27/departures.csv")
+
+departures_raw %>% 
+  count(departure_code)
+
+departures_raw %>% 
+  filter(is.na(departure_code))
+```
+
+```{r}
+departures_raw %>% 
+  filter(departure_code < 9) %>% 
+  mutate(involuntary = if_else(departure_code %in% 3:4, "involuntary", "other")) %>% 
+  filter(fyear > 1995, fyear < 2019) %>% 
+  count(fyear, involuntary) %>% 
+  ggplot(aes(fyear, n, color = involuntary)) +
+  geom_line(size = 1.2, alpha = 0.5) +
+  geom_point(size = 2) +
+  geom_smooth(method = "lm", lty = 2) +
+  scale_y_continuous(limits = c(0, NA)) +
+  labs(
+    x = NULL,
+    y = "Number of CEO departures",
+    color = NULL
+  )
+```
+
+```{r}
+departures <- departures_raw %>% 
+  filter(departure_code < 9) %>% 
+  mutate(involuntary = if_else(departure_code %in% 3:4, "involuntary", "other")) %>% 
+  filter(fyear > 1995, fyear < 2019)
+```
+## Bootstrapping a model
+```{r}
+library(broom)
+
+df <- departures %>% 
+  count(fyear, involuntary) %>% 
+  pivot_wider(names_from = involuntary, values_from = n)
+
+mod <- glm(cbind(involuntary, other) ~ fyear, data = df, family = "binomial")
+summary(mod)
+
+tidy(mod, exponentiate = TRUE)
+```
+
+```{r}
+library(rsample)
+
+set.seed(123)
+ceo_folds <- bootstraps(departures, times = 1e3)
+```
+
+```{r}
+fit_binom <- function(split) {
+  df <- analysis(split) %>% 
+    count(fyear, involuntary) %>% 
+    pivot_wider(names_from = involuntary, values_from = n)
+  
+  mod <- glm(cbind(involuntary, other) ~ fyear, data = df, family = "binomial")
+  tidy(mod, exponentiate = TRUE)
+}
+```
+
+```{r}
+boot_models <- ceo_folds %>% mutate(ceof_info = map(splits, fit_binom))
+```
+### Explore results
+```{r}
+percentile_intervals <- int_pctl(boot_models, coef_info)
+```
+
+```{r}
+boot_models %>% 
+  unnest(coef_info) %>% 
+  filter(term == "fyear") %>% 
+  ggplot(aes(estimate)) +
+  geom_vline(exintercept = 1, lty = 2, color = "gray50", size = 2) +
+  geom_histogram(fill = "midnightblue", alpha = 0.8) +
+  labs(
+    x = "Annual increase in involuntary CEO departures",
+    title = "Over this time period, CEO departures are increasing involuntary",
+    subtitle = "Each passing year corressponds to a departure being 1-2% more likely to be involuntary"
+  )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

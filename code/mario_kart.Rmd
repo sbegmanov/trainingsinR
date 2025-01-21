@@ -1,0 +1,15 @@
+---
+title: "mario_kart"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+
+records <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-05-25/records.csv")
+```
+
+```{r}
+
+```
+
