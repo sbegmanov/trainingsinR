@@ -1,0 +1,22 @@
+---
+title: "austin_housing"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## https://www.kaggle.com/c/sliced-s01e11-semifinals/data?select=train.csv
+
+```{r}
+library(tidyverse)
+
+train_raw <- read_csv("data/austin_train.csv")
+```
+
+```{r}
+
+```
+
+```{r}
+
+```
+

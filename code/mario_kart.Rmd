@@ -1,12 +1,18 @@
 ---
 title: "mario_kart"
 output: html_document
+editor_options: 
+  chunk_output_type: console
 ---
 
 ```{r}
 library(tidyverse)
 
 records <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-05-25/records.csv")
+
+records %>% count(type)
+records %>% count(track)
+records %>% count(shortcut)
 ```
 
 ```{r}
@@ -44,11 +50,15 @@ tree_grid <- grid_regular(cost_complexity(), tree_depth(), levels = 7)
 
 mario_wf <- workflow() %>% 
   add_model(tree_spec) %>% 
-  add_formula(shortct ~ .)
+  add_formula(shortcut ~ .)
 ```
 
 ```{r}
-doParallel::registerDoParallel()
+# doParallel::registerDoParallel()
+
+library(doFuture)
+registerDoFuture()
+plan(multisession)
 
 tree_res <- tune_grid(
   mario_wf,
@@ -59,7 +69,7 @@ tree_res <- tune_grid(
 ```
 ## Evaluate a model
 ```{r}
-collect_metrics(tree_rs)
+collect_metrics(tree_res)
 show_best(tree_res, metric = "accuracy")
 autoplot(tree_res)
 ```
@@ -74,6 +84,7 @@ collect_predictions(tree_res) %>%
 
 ```{r}
 choose_tree <- select_best(tree_res, metric = "accuracy")
+select_by_one_std_err(tree_res, -cost_complexity)
 
 final_res <- mario_wf %>% 
   finalize_workflow(choose_tree) %>% 
@@ -88,8 +99,70 @@ predict(final_fitted, mario_test[10:12, ])
 ```
 
 ```{r}
+library(DALEXtra)
 
+mario_explainer <- explain_tidymodels(
+  final_fitted,
+  data = dplyr::select(mario_train, -shortcut),
+  y = as.integer(mario_train$shortcut),
+  verbose = FALSE
+)
 ```
+
+```{r}
+pdp_time <- model_profile(
+  mario_explainer,
+  variables = "time",
+  N = NULL,
+  groups = "type"
+)
+plot(pdp_time)
+```
+
+```{r}
+as_tibble(pdp_time$agr_profiles) %>% 
+  mutate(`_label_` = str_remove(`_label_`, "workflow_")) %>% 
+  ggplot(aes(`_x_`, `_yhat_`, color = `_label_`)) +
+  geom_line(size = 1.2, alpha = 0.8) +
+  labs(
+    x = "Time to complete track",
+    y = "Predicted probability of shortcut",
+    color = NULL,
+    title = "Partial dependence plot for Mario Kart world records",
+    subtitle = "Predictions from a decision tree model"
+  )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 
 
 
