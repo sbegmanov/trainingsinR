@@ -1,0 +1,29 @@
+---
+title: "star_trek"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+computer_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-08-17/computer.csv")
+
+computer_raw %>% 
+  distinct(value_id, .keep_all = TRUE) %>% 
+  count(char_type)
+```
+
+```{r}
+library(tidytext)
+library(tidylo)
+
+
+
+```
+
+```{r}
+
+```
+
