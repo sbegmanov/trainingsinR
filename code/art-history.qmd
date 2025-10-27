@@ -1,0 +1,21 @@
+---
+title: "art-history"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(arthistory)
+
+data(worksgardner)
+glimpse(worksgardner)
+
+worksgardner %>% count(artist_gender)
+```
+
+```{r}
+
+```
+

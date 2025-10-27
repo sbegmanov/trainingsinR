@@ -1,0 +1,92 @@
+---
+title: "drought_in_texas"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+drought_raw <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-06-14/drought-fips.csv')
+
+drought <- drought_raw %>% 
+  filter(State == "TX", lubridate::year(date) == 2021) %>% 
+  group_by(GEOID = FIPS) %>% 
+  summarise(DSCI = mean(DSCI)) %>% 
+  ungroup()
+```
+## Visualizing drought in TX
+Median household income from US Census: B19013_001
+```{r}
+library(tidycensus)
+
+tx_median_rent <- get_acs(
+  geography = "county",
+  state = "TX",
+  variables = "B19013_001",
+  year = 2020,
+  geometry = TRUE
+)
+
+
+# drought_sf <- tx_median_rent %>% left_join(drought, by = c("GEOID" = "FIPS"))
+drought_sf <- tx_median_rent %>% left_join(drought)
+```
+
+```{r}
+drought_sf %>% 
+  ggplot(aes(fill = DSCI)) +
+  geom_sf(alpha = 0.9, color = NA) +
+  scale_fill_viridis_c()
+```
+
+```{r}
+drought_sf %>% 
+  ggplot(aes(DSCI, estimate)) +
+  geom_point(size = 2, alpha = 0.8) +
+  geom_smooth(method = "lm") +
+  scale_y_continuous(labels = scales::dollar_format()) +
+  labs(x = "Drought score", y = "Median household income")
+```
+## Build a model
+```{r}
+library(tidymodels)
+library(spatialsample)
+
+set.seed(123)
+folds <- spatial_block_cv(drought_sf, v = 10)
+```
+
+```{r}
+autoplot(folds)
+autoplot(folds$splits[[1]])
+```
+
+```{r}
+drought_res <- workflow(estimate ~ DSCI, linear_reg()) %>% 
+  fit_resamples(folds, control = control_resamples(save_pred = TRUE))
+```
+
+```{r}
+collect_predictions(drought_res)
+```
+## Mapping modeling results
+```{r}
+drought_rmse <- drought_sf %>% 
+  mutate(.row = row_number()) %>% 
+  left_join(collect_predictions(drought_res)) %>% 
+  group_by(GEOID) %>% 
+  rmse(estimate, .pred) %>% 
+  select(GEOID, .estimate)
+```
+
+```{r}
+drought_sf %>%
+  left_join(drought_rmse) %>% 
+  ggplot(aes(fill = .estimate)) +
+  geom_sf(color = NA, alpha = 0.8) +
+  labs(fill = "RMSE") +
+  scale_fill_viridis_c(labels = scales::dollar_format())
+```
+

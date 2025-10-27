@@ -1,0 +1,94 @@
+---
+title: "spice_girls"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+lyrics <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-12-14/lyrics.csv")
+
+lyrics %>% distinct(album_name)
+lyrics %>% distinct(album_name, song_name)
+```
+
+```{r}
+library(tidytext)
+
+tidy_lyrics <- lyrics %>% 
+  mutate(song_name = str_replace_all(song_name, "\x92", "'")) %>% 
+  unnest_tokens(word, line) %>% 
+  anti_join(get_stopwords(), by = "word")
+
+tidy_lyrics %>% count(word, sort = TRUE)
+tidy_lyrics %>% count(song_name, word, sort = TRUE)
+tidy_lyrics %>% count(song_name, sort = TRUE)
+```
+## train a topic model
+```{r}
+lyrics_space <- tidy_lyrics %>% 
+  count(song_name, word) %>%
+  cast_sparse(song_name, word, n)
+
+dim(lyrics_space)
+```
+
+```{r}
+library(stm)
+
+set.seed(123)
+topic_model <- stm(lyrics_space, K = 4, verbose = FALSE)
+
+summary(topic_model)
+```
+## Explore topic model results
+```{r}
+word_topics <- tidy(topic_model, matrix = "beta")
+```
+
+```{r}
+word_topics %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 10) %>% 
+  ungroup() %>% 
+  mutate(topic = paste("Topic", topic)) %>%
+  ggplot(aes(beta, reorder_within(term, beta, topic), fill = topic)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(topic), scales = "free_y") +
+  scale_x_continuous(expand = c(0, 0)) +
+  scale_y_reordered() +
+  labs(x = expression(beta), y = NULL)
+```
+
+```{r}
+song_topics <- tidy(topic_model,
+                    matrix = "gamma",
+                    document_names = rownames(lyrics_space)
+                    )
+```
+
+```{r}
+song_topics %>% 
+  mutate(
+    song_name = fct_reorder(document, gamma),
+    topic = factor(topic)
+  ) %>% 
+  ggplot(aes(gamma, topic, fill = topic)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(song_name), ncol = 4) +
+  scale_x_continuous(expand = c(0, 0)) +
+  labs(x = expression(gamma), y = "Topic")
+```
+
+```{r}
+effects <- estimateEffect(
+  1:4 ~ album_name,
+  topic_model,
+  tidy_lyrics %>% distinct(song_name, album_name) %>% arrange(song_name)
+)
+
+summary(effects)
+tidy(effects)
+```

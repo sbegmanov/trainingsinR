@@ -1,0 +1,161 @@
+---
+title: "stranger_things"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+episodes_raw <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-10-18/stranger_things_all_dialogue.csv')
+```
+
+```{r}
+dialogue <- episodes_raw %>% 
+  filter(!is.na(dialogue)) %>% 
+  mutate(season = paste0("season", season))
+```
+
+```{r}
+library(tidytext)
+
+tidy_dialogue <- dialogue %>% 
+  unnest_tokens(word, dialogue)
+
+tidy_dialogue %>% count(season, word, sort = TRUE)
+tidy_dialogue %>% distinct(season, episode) %>% count(season)
+```
+
+```{r}
+library(tidylo)
+
+tidy_dialogue %>% 
+  count(season, word, sort = TRUE) %>% 
+  bind_log_odds(season, word, n) %>% 
+  filter(n > 20) %>% 
+  group_by(season) %>% 
+  slice_max(log_odds_weighted, n = 10) %>% 
+  ungroup() %>%
+  mutate(word = reorder_within(word, log_odds_weighted, season)) %>% 
+  ggplot(aes(log_odds_weighted, word, fill = season)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(season), scale = "free") +
+  scale_y_reordered() +
+  labs(y = NULL)
+```
+## Train a topic model
+```{r}
+dialogue_sparse <- tidy_dialogue %>% 
+  mutate(document = paste(season, episode, sep = "_")) %>% 
+  count(document, word) %>% 
+  filter(n > 5) %>% 
+  cast_sparse(document, word, n)
+
+dim(dialogue_sparse)
+```
+
+```{r}
+library(stm)
+
+set.seed(123)
+topic_model <- stm(dialogue_sparse, K = 5, verbose = FALSE)
+summary(topic_model)
+```
+## Explore topic model results
+```{r}
+tidy(topic_model, matrix = "beta") %>% 
+  group_by(topic) %>% 
+  slice_max(beta, n = 10) %>% 
+  # arrange(-beta) %>% 
+  mutate(rank = row_number()) %>% 
+  ungroup() %>% 
+  select(-beta) %>% 
+  # arrange(topic) %>% 
+  pivot_wider(
+    names_from = "topic",
+    names_glue = "topic {.name}",
+    values_from = term
+  ) %>% 
+  select(-rank) %>% 
+  knitr::kable()
+```
+
+```{r}
+# ?stm::calcfrex
+
+tidy(topic_model, matrix = "frex") %>% 
+  group_by(topic) %>% 
+  slice_head(n = 10) %>% 
+  mutate(rank = row_number()) %>% 
+  ungroup() %>% 
+  pivot_wider(
+    names_from = "topic",
+    names_glue = "topic {.name}",
+    values_from = term
+  ) %>% 
+  select(-rank) %>% 
+  knitr::kable()
+```
+
+```{r}
+# ?stm::calclift
+
+tidy(topic_model, matrix = "lift") %>% 
+  group_by(topic) %>% 
+  slice_head(n = 10) %>% 
+  mutate(rank = row_number()) %>% 
+  ungroup() %>% 
+  pivot_wider(
+    names_from = "topic",
+    names_glue = "topic {.name}",
+    values_from = term
+  ) %>% 
+  select(-rank) %>% 
+  knitr::kable()
+```
+
+```{r}
+episode_gamma <- tidy(
+  topic_model,
+  matrix = "gamma",
+  document_names = rownames(dialogue_sparse)
+)
+```
+
+```{r}
+episode_parsed <- episode_gamma %>% 
+  separate(document, c("season", "episode"), sep = "_")
+```
+
+```{r}
+episode_parsed %>% 
+  mutate(topic = factor(topic)) %>% 
+  ggplot(aes(topic, gamma, fill = topic)) +
+  geom_boxplot(alpha = 0.7, show.legend = FALSE) +
+  facet_wrap(vars(season)) +
+  labs(y = expression(gamma))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,106 @@
+---
+title: "tuskegee_airmen"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+airmen_raw <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-02-08/airmen.csv")
+
+airmen_raw %>% count(pilot_type)
+```
+
+```{r}
+airmen <- airmen_raw %>%
+  mutate(pilot_type = str_replace(pilot_type, "Liason", "Liaison"))
+
+airmen %>% 
+  ggplot(aes(pilot_type, fill = rank_at_graduation)) +
+  geom_bar(stat = "count")
+```
+
+```{r}
+library(infer)
+
+aircraft <- c("Single engine", "Twin engine")
+ranks <- c("Flight Officer", "2nd Lt")
+
+pilot_vs_rank <- airmen %>% 
+  filter(pilot_type %in% aircraft, rank_at_graduation %in% ranks) %>% 
+  specify(pilot_type ~ rank_at_graduation, success = "Twin engine")
+
+set.seed(123)
+bootstrapped <- pilot_vs_rank %>% 
+  generate(reps = 1000, type = "bootstrap")
+
+set.seed(234)
+permuted <- pilot_vs_rank %>% 
+  hypothesize(null = "independence") %>% 
+  generate(reps = 1000, type = "permute")
+```
+## Chi-squared static
+```{r}
+pilot_vs_rank %>% count(pilot_type, rank_at_graduation)
+
+observed <- pilot_vs_rank %>% 
+  calculate(stat = "chisq", order = ranks)
+
+airmen_chisq <- bootstrapped %>% 
+  calculate(stat = "chisq", order = ranks)
+
+get_ci(airmen_chisq)
+```
+
+```{r}
+visualize(airmen_chisq) +
+  shade_ci(
+    endpoints = get_ci(airmen_chisq),
+    fill = "midnightblue",
+    color = "midnightblue",
+    lty = 2
+  )
+```
+
+```{r}
+permuted %>% 
+  calculate(stat = "chisq", order = ranks) %>% 
+  visualize() +
+  shade_p_value(obs_stat = observed, direction = NULL, color = "gray40", lty = 2)
+```
+## Odds ratio
+```{r}
+odds_desc <- paste(
+  "Flight officers were more likely to pilot twin engine aircraft",
+  "2nd Lts were more likely to pilot single engine aircraft",
+  sep = "\n"
+)
+
+bootstrapped %>% 
+  calculate(stat = "odds ratio", order = ranks) %>% 
+  visualize() +
+  labs(
+    title = "Bootstrap distribution of Tuskegee airmen's rank by aircraft type",
+    subtitle = odds_desc,
+    x = "Odds ratio of twin vs. single engine (for flight officers compared to 2nd Lt)"
+  )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

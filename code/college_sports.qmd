@@ -1,0 +1,130 @@
+---
+title: "college_sports"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+sports_raw <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-03-29/sports.csv')
+
+unique(sports_raw$sports)
+```
+
+```{r}
+sports_parsed <- sports_raw %>% 
+  mutate(sports = case_when(
+    str_detect(sports, "Swimming") ~ "Swimming and Diving",
+    str_detect(sports, "Diving") ~ "Swimming and Diving",
+    str_detect(sports, "Track") ~ "Track",
+    TRUE ~ sports
+  ))
+
+unique(sports_parsed$sports)
+```
+
+```{r}
+unique(sports_parsed$classification_name)
+
+sports <- bind_rows(
+  sports_parsed %>% 
+    select(year, institution_name, sports,
+           participants = partic_men,
+           revenue = rev_men,
+           expenditure = exp_men) %>% 
+    mutate(gender = "men"),
+  sports_parsed %>% 
+    select(year, institution_name, sports,
+           participants = partic_women,
+           revenue = rev_women,
+           expenditure = exp_women) %>% 
+  mutate(gender = "women")
+) %>% na.omit()
+```
+
+```{r}
+sports %>%
+  mutate(sports = fct_reorder(sports, expenditure)) %>% 
+  ggplot(aes(expenditure, sports, fill = gender, colour = gender)) +
+  geom_boxplot(position = position_dodge(preserve = "single"), alpha = 0.2) +
+  scale_x_log10(labels = scales::dollar) +
+  theme(legend.position = "top") +
+  scale_fill_brewer(palette = "Dark2") +
+  scale_color_brewer(palette = "Dark2") +
+  labs(y = NULL, color = NULL, fill = NULL, x = "Expenditures per team")
+```
+## Build linear models
+```{r}
+ignore_sport <- lm(expenditure ~ gender + participants, data = sports)
+account_for_sport <- lm(expenditure ~ gender + participants + sports, data = sports)
+
+summary(ignore_sport)
+```
+
+```{r}
+library(broom)
+
+bind_rows(
+  tidy(ignore_sport) %>% mutate(sport = "ignore"),
+  tidy(account_for_sport) %>% mutate(sport = "account for sport")
+) %>% 
+  filter(!str_detect(term, "sports"), term != "(Intercept)") %>% 
+  ggplot(aes(estimate, term, colour = sport)) +
+  geom_vline(xintercept = 0, size = 1.5, lty = 2, color = "gray50") +
+  geom_errorbar(size = 1.4, alpha = 0.7,
+                aes(xmin = estimate - 1.96 * std.error,
+                    xmax = estimate + 1.96 * std.error)) +
+  geom_point(size = 3) +
+  scale_x_continuous(labels = scales::dollar) +
+  theme(legend.position = "bottom") +
+  scale_color_brewer(palette = "Accent") +
+  labs(x = "Change in expenditures", y = NULL, color = "Include sport in model ?",
+       title = "Expenditures on college sports",
+       subtitle = "Colleges spend less on women's sports overall\nFor the same sport, we don't see differences by gender")
+```
+## Bootstrap intervals
+```{r}
+library(rsample)
+
+set.seed(123)
+ignore_intervals <- reg_intervals(expenditure ~ gender + participants, data = sports, times = 500)
+
+set.seed(123)
+account_for_sport_intervals <- reg_intervals(expenditure ~ gender + participants + sports, data = sports, times = 500)
+
+account_for_sport_intervals %>% 
+  filter(str_detect(term, "sports")) %>% 
+  arrange(desc(.estimate))
+```
+
+```{r}
+bind_rows(
+  ignore_intervals %>% mutate(sport = "ignore"),
+  account_for_sport_intervals %>% mutate(sport = "account for sport")
+) %>% 
+  filter(!str_detect(term, "sports")) %>% 
+  ggplot(aes(.estimate, term, color = sport)) +
+  geom_vline(xintercept = 0, size = 1.5, lty = 2, color = "gray50") +
+  geom_errorbar(size = 1.4, alpha = 0.7, aes(xmin = .lower, xmax = .upper)) +
+  geom_point(size = 3) +
+  scale_x_continuous(labels = scales::dollar) +
+  scale_color_brewer(palette = "Accent") +
+  theme(legend.position = "bottom") +
+  labs(x = "Change in expenditures", y = NULL, color = "Include sport in model?",
+       title = "Bootstrap confidence intervals for expenditures in college sports",
+       subtitle = "Colleges spend less on women's sports overall\nIn any specific sport, we don't see evidence for differences")
+```
+
+
+
+
+
+
+
+
+
+
+
+

@@ -1,0 +1,89 @@
+```{r}
+library(tidyverse)
+library(datardis)
+data("drwho_episodes")
+data("drwho_writers")
+
+```
+
+```{r}
+dr_who_joined <- drwho_episodes %>% 
+  left_join(drwho_writers) %>% 
+  mutate(rating = as.numeric(rating)) %>% 
+  group_by(writer) %>% 
+  summarize(
+    n = n(),
+    std_var = var(rating) / n,
+    rating = mean(rating)
+  )
+```
+
+```{r}
+ggplot(dr_who_joined, aes(n, rating)) +
+  geom_point(size = 2)
+```
+### Prior distribution
+```{r}
+prior_mu <- mean(dr_who_joined$rating)
+prior_var <- var(dr_who_joined$rating)
+
+ggplot(dr_who_joined) +
+  geom_histogram(aes(rating, after_stat(density)), alpha = 0.6) +
+  stat_function(fun = dnorm,
+                args = list(mean = prior_mu, sd = sqrt(prior_var)),
+                color = "gray30", linewidth = 1.5, lty = 2)
+  
+```
+### Posterior distribution
+```{r}
+dr_who_emperical <- 
+  dr_who_joined %>% 
+  mutate(
+    shrinkage = prior_var / (prior_var + std_var),
+    rating_shrunk = shrinkage * rating + (1 - shrinkage) * prior_mu
+  )
+  
+```
+
+```{r}
+library(ggrepel)
+
+dr_who_emperical %>% 
+  ggplot(aes(rating, rating_shrunk)) +
+  geom_abline(slope = 1, color = "gray60", lty = 2) +
+  geom_point(aes(size = n), color = "midnightblue") +
+  geom_text_repel(aes(label = writer), family = "IBMPlexSans")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

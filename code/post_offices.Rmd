@@ -1,0 +1,146 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+```{r}
+library(tidyverse)
+
+post_offices <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2021/2021-04-13/post_offices.csv")
+```
+
+```{r}
+post_offices %>% count(state, sort = TRUE)
+post_offices %>% 
+  filter(state == "HI") %>% 
+  pull(name)
+```
+## Build a mdoel
+```{r}
+library(tidymodels)
+
+set.seed(123)
+po_split <- post_offices %>% 
+  mutate(state = case_when(
+    state == "HI" ~ "Hawaii",
+    TRUE ~ "Other"
+  )) %>% 
+  select(name, state) %>%
+  initial_split(strata = state)
+
+po_train <- training(po_split)
+po_test <- testing(po_split)
+```
+
+```{r}
+set.seed(234)
+po_folds <- vfold_cv(po_train, strata = state)
+```
+
+```{r}
+library(textrecipes)
+library(themis)
+
+po_rec <- recipe(state ~ name, data = po_train) %>% 
+  step_tokenize(name, engine = "tokenizers.bpe",
+                training_options = list(vocab_size = 200)) %>% 
+  step_tokenfilter(name, max_tokens = 200) %>% 
+  step_tf(name) %>% 
+  step_normalize(all_predictors()) %>% 
+  step_smote(state)
+```
+
+```{r}
+po_rec %>% 
+  prep() %>% 
+  bake(new_data = NULL)
+```
+
+```{r}
+svm_spec <- svm_linear() %>% 
+  set_mode("classification") %>% 
+  set_engine("LiblineaR")
+```
+
+```{r}
+po_wf <- workflow() %>% 
+  add_recipe(po_rec) %>% 
+  add_model(svm_spec)
+```
+
+```{r}
+set.seed(234)
+
+doParallel::registerDoParallel()
+po_rs <- fit_resamples(
+  po_wf,
+  po_folds,
+  metrics = metric_set(accuracy, sens, spec)
+)
+
+collect_metrics(po_rs)
+```
+## Fit and evaluate final model
+```{r}
+final_fitted <- last_fit(
+  po_wf,
+  po_split,
+  metrics = metric_set(accuracy, sens, spec)
+)
+collect_metrics(final_fitted)
+
+collect_predictions(final_fitted) %>% 
+  conf_mat(state, .pred_class) %>% 
+  autplot(type = "heatmap")
+```
+
+```{r}
+po_fit <- pull_workflow(final_fitted$.workflow[[1]])
+
+liblinear_obj <- po_fit$fit$W
+
+liblinear_df <- tibble(
+  term = colnames(liblinear_obj),
+  estimate = liblinear_obj[1, ]
+)
+
+liblinear_df %>% 
+  arrange(-estimate)
+```
+
+```{r}
+liblinear_df %>% 
+  filter(term != "Bias") %>% 
+  group_by(estimate > 0) %>% 
+  slice_max(abs(estimate), n = 15) %>% 
+  ungroup() %>% 
+  mutate(term = str_remove(term, "tf_name_")) %>% 
+  ggplot(aes(estimate, fct_reorder(term, estimate), fill = estimate > 0)) +
+  geom_col(alpha = 0.6) +
+  geom_text(aes(label = term), family = "IBMPlexSans-Medium") +
+  scale_fill_discrete(labels = c("More from Hawaii", "Less from Hawaii")) +
+  scale_y_discrete(breaks = NULL) +
+  theme(axis.text.y = element_blank()) +
+  labs(
+    x = "Coefficient from linear SVM",
+    y = NULL,
+    x = NULL,
+    title = "Which subwords in a US Post Office name are used more in Hawaii?",
+    subtitle = "Subwords like A, I, O, and AN are the strongest predictors of a post office being in Hawaii"
+  )
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

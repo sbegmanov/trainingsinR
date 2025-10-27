@@ -1,0 +1,212 @@
+```{r}
+library(tidyverse)
+
+gdpr_raw <- readr::read_tsv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-04-21/gdpr_violations.tsv")
+
+gdpr_raw %>% 
+  mutate(date = lubridate::mdy(date))
+  
+```
+
+# Article 5: principles for processing personal data (legitimate purpose, limited)
+# Article 6: lawful processing of personal data (i.e. consent, etc)
+# Article 13: inform subject when personal data is collected
+# Article 15: right of access by data subject
+# Article 32: security of processing (i.e. data breaches)
+
+```{r}
+gdpr_raw %>% 
+  ggplot(aes(price + 1)) +
+  geom_histogram() +
+  scale_x_log10(labels = scales::dollar_format(prefix = "€")) +
+  labs(
+    x = "GDPR fine (EUR)"
+  )
+```
+
+```{r}
+gdpr_tidy <- gdpr_raw %>% 
+  transmute(id,
+            price,
+            country = name,
+            article_violated,
+            articles = str_extract_all(article_violated, 
+                                       "Art. [:digit:]+|Art.[:digit:]+")) %>% 
+  mutate(total_articles = map_int(articles, length)) %>% 
+  unnest(articles) %>% #count(articles, sort = TRUE)
+  add_count(articles) %>% 
+  filter(n > 10) %>% 
+  select(-n)
+```
+
+```{r}
+library(ggbeeswarm)
+
+gdpr_tidy %>% 
+  mutate(articles = str_replace(articles, "Art. ", "Article "),
+         articles = fct_reorder(articles, price)) %>% 
+  ggplot(aes(articles, price + 1, color = articles, fill = articles)) +
+  geom_boxplot(alpha = 0.2, outlier.colour = NA) +
+  geom_quasirandom() +
+  scale_y_log10(labels = scales::dollar_format(prefix = "€")) +
+  labs(
+    x = NULL,
+    y = "GDPR fine (EUR)"
+  ) +
+  theme(legend.position = "none")
+```
+
+```{r}
+gdpr_violatons <- gdpr_tidy %>% 
+  mutate(value = 1) %>% 
+  select(-article_violated) %>% 
+  pivot_wider(names_from = articles, values_from = value,
+              values_fn = list(value = max), values_fill = list(value = 0)) %>% 
+  janitor::clean_names() #%>% 
+  #mutate_if(is.character, factor)
+```
+### Build a model
+```{r}
+library(tidymodels)
+
+gdpr_rec <- recipe(price ~ ., data = gdpr_violatons) %>% 
+  update_role(id, new_role = "id") %>% 
+  step_log(price, base = 10, offset = 1, skip = TRUE) %>% 
+  step_other(country, other = "Other") %>% 
+  step_dummy(all_nominal()) %>% 
+  step_zv(all_predictors())
+
+gdpr_prep <- prep(gdpr_rec)
+juice(gdpr_prep)
+
+lm(price ~ ., data = juice(gdpr_prep))
+
+```
+
+```{r}
+gdpr_wf <- workflow() %>% 
+  add_recipe(gdpr_rec) %>% 
+  add_model(linear_reg() %>% 
+              set_engine("lm"))
+```
+## Explore results
+```{r}
+gdpr_fit <- gdpr_wf %>% 
+  fit(data = gdpr_violatons)
+
+gdpr_fit %>% 
+  extract_fit_parsnip() %>% 
+  tidy() %>% 
+  filter(p.value < 0.05) # p.value < 0.1
+```
+
+```{r}
+new_gdpr <- crossing(country = "Other",
+                     art_5 = 0:1,
+                     art_6 = 0:1,
+                     art_13 = 0:1,
+                     art_15 = 0:1,
+                     art_32 = 0:1) %>% 
+  mutate(total_articles = art_5 + art_6 + art_13 + art_15 + art_32,
+         id = row_number())
+```
+
+```{r}
+
+mean_pred <- predict(gdpr_fit, 
+                     new_data = new_gdpr)
+
+conf_int_pred <- predict(gdpr_fit,
+                         new_data = new_gdpr,
+                         type = "conf_int")
+
+gdpr_res <- new_gdpr %>% 
+  bind_cols(mean_pred) %>% 
+  bind_cols(conf_int_pred)
+
+```
+
+```{r}
+gdpr_res %>% 
+  filter(total_articles == 1) %>% 
+  pivot_longer(art_5:art_32) %>% 
+  filter(value > 0) %>% 
+  mutate(name = str_replace(name, "art_", "Article "),
+         name = fct_reorder(name, .pred)) %>% 
+  ggplot(aes(name, 10 ^ .pred, colour = name)) +
+  geom_errorbar(aes(ymin = 10 ^ .pred_lower,
+                    ymax = 10 ^.pred_upper),
+                width = 0.2, alpha = 0.7) +
+  geom_point(size = 3) +
+  scale_y_log10(labels = scales::dollar_format(prefix = "€", accuracy = 1)) +
+  labs(
+    x = NULL,
+    y = "Predicted GDPR fine (EUR)"
+  ) +
+  theme(legend.position = "none")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

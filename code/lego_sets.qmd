@@ -1,0 +1,107 @@
+---
+title: "lego_sets"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+lego_sets <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-09-06/sets.csv.gz')
+
+glimpse(lego_sets)
+```
+
+```{r}
+lego_sets %>% filter(num_parts == 0)
+
+lego_sets %>% 
+  filter(num_parts > 0) %>% 
+  ggplot(aes(num_parts)) +
+  geom_histogram(bins = 20) +
+  scale_x_log10()
+```
+## Build a model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+lego_split <- lego_sets %>% 
+  filter(num_parts > 0) %>% 
+  transmute(num_parts = log10(num_parts), name) %>% 
+  initial_split(strata = num_parts)
+
+lego_train <- training(lego_split)
+lego_test <- testing(lego_split)
+
+set.seed(234)
+lego_folds <- vfold_cv(lego_train, strata = num_parts)
+```
+
+```{r}
+library(textrecipes)
+
+lego_rec <- recipe(num_parts ~ name, data = lego_train) %>% 
+  step_tokenize(name) %>% 
+  step_tokenfilter(name, max_tokens = 200) %>% 
+  step_tfidf(name)
+```
+
+```{r}
+svm_spec <- svm_linear(mode = "regression")
+lego_wf <- workflow(lego_rec, svm_spec)
+```
+
+```{r}
+set.seed(234)
+doParallel::registerDoParallel()
+lego_rs <- fit_resamples(lego_wf, lego_folds)
+collect_metrics(lego_rs)
+```
+
+```{r}
+final_fitted <- last_fit(lego_wf, lego_split)
+collect_metrics(final_fitted)
+```
+
+```{r}
+final_fitted %>% 
+  extract_workflow() %>% 
+  tidy() %>% 
+  arrange(-estimate)
+```
+## Version and deploy the model
+```{r}
+library(vetiver)
+
+v <- final_fitted %>% 
+  extract_workflow() %>% 
+  vetiver_model(model_name = "lego-sets")
+```
+
+```{r}
+library(pins)
+
+# board <- board_rsconnect() ## board_s3(), board_azure()
+board <- board_connect()
+board %>% vetiver_pin_write(v)
+```
+
+```{r}
+vetiver_write_plumber(board, "lego-sets", rsconnect = FALSE)
+vetiver_write_docker(v)
+```
+## using Docker on PC
+```{r}
+# docker build --platform linux/amd64 -t lego-set-names .
+# docker run --env-file .Renviron --rm -p 8000:8000 lego-set-names
+```
+
+
+
+
+
+
+
+

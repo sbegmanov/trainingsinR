@@ -1,0 +1,114 @@
+---
+title: "rstats_vignettes"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+cran <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-03-15/cran.csv")
+
+cran %>% filter(package == "tydytext")
+cran %>% filter(package == "rsample")
+```
+
+```{r}
+vignette_counts <- cran %>% 
+  group_by(package) %>% 
+  summarise(
+    release_date = first(date),
+    releases = n(),
+    vignettes = last(rnw) + last(rmd)
+  ) #%>% mutate(release_date = lubridate::ymd_hms(release_date))
+
+mean(vignette_counts$vignettes < 1)
+```
+
+```{r}
+vignette_counts %>% 
+  ggplot(aes(vignettes)) +
+  geom_histogram(bins = 12) +
+  scale_x_continuous(trans = scales::pseudo_log_trans(base = 10))
+```
+
+```{r}
+vignette_counts %>% filter(vignettes > 20)
+```
+
+```{r}
+vignette_counts %>% 
+  mutate(has_vignette = vignettes > 0) %>% 
+  ggplot(aes(has_vignette, releases, color = has_vignette, fill = has_vignette)) +
+  geom_boxplot(size = 1.5, alpha = 0.2, show.legend = FALSE) +
+  scale_y_log10() +
+  coord_flip() +
+  labs(x = "Has a vignette ?")
+```
+## Using Poisson regression
+```{r}
+library(tidymodels)
+library(poissonreg)
+
+poisson_wf <- workflow(vignettes ~ releases, poisson_reg())
+fit(poisson_wf, data = vignette_counts)
+```
+## Zero-inflated Poisson: ZIP model
+```{r}
+zip_spec <- poisson_reg() %>% set_engine("zeroinfl")
+
+zip_wf <- workflow() %>% 
+  add_variables(outcomes = vignettes, predictors = releases) %>% 
+  add_model(zip_spec, formula = vignettes ~ releases | releases)
+
+fit(zip_wf, data = vignette_counts)
+```
+## Bootstrap intervals for the coefficients
+```{r}
+folds <- bootstraps(vignette_counts, times = 1000, apparent = TRUE)
+```
+
+```{r}
+get_coefs <- function(x) {
+  x %>% 
+    extract_fit_engine() %>% 
+    tidy(type = "zero")
+}
+
+fit(zip_wf, data = vignette_counts) %>% get_coefs()
+```
+
+```{r}
+ctrl <- control_resamples(extract = get_coefs)
+
+doParallel::registerDoParallel()
+set.seed(123)
+
+zip_res <- fit_resamples(zip_wf, folds, control = ctrl)
+zip_res$.extracts[[33]]
+```
+
+```{r}
+zip_res %>% 
+  select(id, .extracts) %>% 
+  unnest(.extracts) %>% 
+  unnest(.extracts) %>% 
+  ggplot(aes(x = estimate, fill = term)) +
+  geom_histogram(color = "white", alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(~term, scales = "free_x") +
+  geom_vline(xintercept = 0, lty = 2, size = 1.2, color = "gray70")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

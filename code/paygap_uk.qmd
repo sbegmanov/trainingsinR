@@ -1,0 +1,154 @@
+---
+title: "paygap_uk"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+paygap_raw <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-06-28/paygap.csv')
+
+paygap_raw %>% select(contains("quartile"))
+paygap_raw %>% select(contains("diff"))
+paygap_raw %>% select(contains("sic"))
+```
+
+```{r}
+paygap_raw %>% 
+  select(sic_codes) %>% 
+  separate_rows(sic_codes, sep = ":") %>% 
+  count(sic_codes, sort = TRUE)
+
+uk_sic_codes <- read_csv("data/SIC07_CH_condensed_list_en.csv") %>% 
+  janitor::clean_names()
+```
+
+```{r}
+paygap_raw %>% 
+  ggplot(aes(diff_median_hourly_percent / 100)) +
+  geom_histogram(bins = 15) +
+  scale_x_continuous(limits = c(-0.5, 0.5), labels = scales::percent)
+```
+
+```{r}
+paygap_joined <- paygap_raw %>% 
+  select(employer_name, diff_median_hourly_percent, sic_codes) %>% 
+  separate_rows(sic_codes, sep = ":") %>% 
+  left_join(uk_sic_codes, by = c("sic_codes" = "sic_code"))
+
+paygap_joined %>% count(sic_codes, sort = TRUE)
+paygap_joined %>% count(description, sort = TRUE)
+```
+
+```{r}
+library(tidytext)
+
+paygap_tokenized <- paygap_joined %>% 
+  unnest_tokens(word, description) %>% 
+  anti_join(get_stopwords()) %>% 
+  na.omit()
+```
+
+```{r}
+top_words <- paygap_tokenized %>% 
+  count(word) %>% 
+  filter(!word %in% c("activities", "n.e.c", "general", "non")) %>% 
+  slice_max(n, n = 40) %>% 
+  pull(word)
+
+paygap <- paygap_tokenized %>% 
+  filter(word %in% top_words) %>% 
+  transmute(
+    diff_wage = diff_median_hourly_percent / 100,
+    word
+  )
+```
+## Take 1. Summarize and visualize
+```{r}
+paygap %>% 
+  group_by(word) %>% 
+  summarise(diff_wage = mean(diff_wage)) %>% 
+  mutate(word = fct_reorder(word, diff_wage)) %>% 
+  ggplot(aes(diff_wage, word)) +
+  geom_point(alpha = 0.9, size = 2, color = "midnightblue") +
+  labs(x = "% increase in men's hourly wages compared to women's", y = NULL)
+
+## which jobs women get more diff ?
+paygap_joined %>% filter(str_detect(description, "similar")) %>% View()
+```
+## Take 2. Fit a single linear model
+```{r}
+library(broom)
+
+paygap_fit <- lm(diff_wage ~ 0 + word, data = paygap)
+summary(paygap_fit)
+
+tidy(paygap_fit) %>% arrange(-estimate)
+```
+
+```{r}
+library(dotwhisker)
+
+tidy(paygap_fit) %>% 
+  filter(p.value < 0.05) %>% 
+  mutate(
+    term = str_remove(term, "word"),
+    term = fct_reorder(term, -estimate)
+  ) %>% 
+  dwplot(vars_order = levels(.$term),
+         dot_args = list(size = 2, color = "midnightblue"),
+         whisker_args = list(color = "midnightblue", alpha = 0.8)) +
+  scale_x_continuous(labels = scales::percent) +
+  labs(x = "% increase in men's hourly wages compared to women's", y = NULL)
+```
+## Take 3. Fit many models
+```{r}
+library(rsample)
+
+paygap_intervals <- reg_intervals(diff_wage ~ 0 + word, data = paygap)
+```
+
+```{r}
+paygap_intervals %>% 
+  mutate(
+    term = str_remove(term, "word"),
+    term = fct_reorder(term, .estimate)
+  ) %>% 
+  ggplot(aes(.estimate, term)) +
+  geom_crossbar(aes(xmin = .lower, xmax = .upper),
+                color = "midnightblue", alpha = 0.8) +
+  scale_x_continuous(labels = scales::percent) +
+  labs(x = "% increase in men's hourly wages compared to women's", y = NULL)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

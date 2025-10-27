@@ -1,0 +1,151 @@
+---
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## https://github.com/rfordatascience/tidytuesday/blob/master/data/2020/2020-10-27/readme.md
+```{r }
+library(tidyverse)
+turbines <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2020/2020-10-27/wind-turbine.csv")
+```
+## Including Plots
+```{r }
+turbines %>% count(commissioning_date, sort = TRUE)
+
+turbines %>% transmute(commissioning_date = parse_number(commissioning_date)) %>% 
+  count(commissioning_date, sort = TRUE)
+
+turbines %>% names()
+turbines %>% count(model, sort = TRUE)
+turbines %>% count(province_territory, sort = TRUE)
+turbines %>% filter(is.na(turbine_rated_capacity_k_w))
+```
+
+```{r}
+turbines_df <- turbines %>% 
+  transmute(turbine_capacity = turbine_rated_capacity_k_w,
+                       rotor_diameter_m,
+                       hub_height_m,
+                       commissioning_date = parse_number(commissioning_date),
+                       province_territory = fct_lump(province_territory, 8),
+                       model = fct_lump(model, 10)) %>% 
+  filter(!is.na(turbine_capacity)) %>% 
+  mutate_if(is.character, factor)
+
+turbines_df %>% names()
+```
+
+```{r}
+turbines_df %>% 
+  select(turbine_capacity:commissioning_date) %>% 
+  pivot_longer(rotor_diameter_m:commissioning_date) %>% 
+  ggplot(aes(turbine_capacity, value)) +
+  geom_hex(bins = 15, alpha = 0.8) +
+  geom_smooth(method = "lm") +
+  facet_wrap(~name, scales = "free_y") +
+  labs(y = NULL) +
+  scale_fill_gradient(high = "cyan3")
+```
+## Build a model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+wind_split <- initial_split(turbines_df, strata = turbine_capacity)
+wind_train <- training(wind_split)
+wind_test <- testing(wind_split)
+
+set.seed(234)
+wind_folds <- vfold_cv(wind_train, strata = turbine_capacity)
+```
+
+```{r}
+tree_spec <- decision_tree(
+  cost_complexity = tune(),
+  tree_depth = tune(),
+  min_n = tune()
+) %>% 
+  set_engine("rpart") %>% 
+  set_mode("regression")
+
+# setup parameters
+tree_grid <- grid_regular(cost_complexity(), tree_depth(), min_n(), levels = 4)
+```
+
+```{r}
+doParallel::registerDoParallel()
+
+set.seed(345)
+tree_rs <- tune_grid(
+  tree_spec,
+  turbine_capacity ~ .,
+  resamples = wind_folds,
+  grid = tree_grid,
+  metrics = metric_set(rmse, rsq, mae, mape)
+)
+```
+## Explore results
+```{r}
+collect_metrics(tree_rs)
+autoplot(tree_rs) + theme_light()
+```
+
+```{r}
+show_best(tree_rs)
+show_best(tree_rs, metric = "mape")
+show_best(tree_rs, metric = "rmse")
+```
+
+```{r}
+final_tree <- finalize_model(tree_spec, select_best(tree_rs, metric = "rmse"))
+```
+
+```{r}
+final_fit <- fit(final_tree, turbine_capacity ~ ., wind_train)
+final_rs <- last_fit(final_tree, turbine_capacity ~ ., wind_split)
+```
+### Predicting on new data
+```{r}
+predict(final_fit, wind_train[44, ])
+predict(final_rs$.workflow[[1]], wind_train[44, ])
+```
+
+```{r}
+library(vip)
+
+final_fit %>% 
+  vip(geom = "col", aesthetics = list(fill = "midnightblue", alpha = 0.8)) +
+  scale_y_continuous(expand = c(0, 0))
+```
+
+```{r}
+library(parttree)
+
+ex_fit <- fit(final_tree, turbine_capacity ~ rotor_diameter_m + commissioning_date, wind_train)
+
+wind_train %>% 
+  ggplot(aes(rotor_diameter_m, commissioning_date)) +
+  geom_parttree(data = ex_fit, aes(fill = turbine_capacity), alpha = 0.3) +
+  geom_jitter(alpha = 0.7, width = 1,  height = 0.5, aes(color = turbine_capacity)) +
+  scale_colour_viridis_c(aesthetics = c("color", "fill"))
+```
+
+```{r}
+collect_metrics(final_rs)
+
+collect_predictions(final_rs) %>% 
+  ggplot(aes(turbine_capacity, .pred)) +
+  geom_abline(slope = 1, lty = 2, color = "gray50", alpha = 0.5) +
+  geom_point(alpha = 0.6, color = "midnightblue")
+```
+
+
+
+
+
+
+
+
+
+
+

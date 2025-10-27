@@ -1,0 +1,162 @@
+---
+title: "board_games"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+ratings <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-01-25/ratings.csv")
+
+details <- read_csv("https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-01-25/details.csv")
+
+ratings_joined <- ratings %>% 
+  left_join(details, by = "id")
+```
+
+```{r}
+ggplot(ratings_joined, aes(average)) +
+  geom_histogram(alpha = 0.8)
+
+ratings_joined %>% 
+filter(!is.na(minage)) %>% 
+  mutate(minage = cut_number(minage, 4)) %>% View()
+  ggplot(aes(minage, average, fill = minage)) +
+  geom_boxplot(alpha = 0.2, show.legend = FALSE)
+```
+## Tune an xgboost model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+game_split <- ratings_joined %>% 
+  select(name, average, matches("min|max"), boardgamecategory) %>% 
+  na.omit() %>% 
+  initial_split(strata = average)
+
+game_train <- training(game_split)
+game_test <- testing(game_split)
+
+set.seed(234)
+game_folds <- vfold_cv(game_train, strata = average)
+```
+
+```{r}
+library(textrecipes)
+
+x1 <- game_train %>% sample_n(1) %>% pull(boardgamecategory)
+x1 %>% str_split(", ") %>% map(str_remove_all, "[:punct:]")
+
+
+split_category <- function(x) {
+  x %>% 
+    str_split(", ") %>% 
+    map(str_remove_all, "[:punct:]") %>% 
+    map(str_squish) %>% 
+    map(str_to_lower) %>% 
+    map(str_replace_all, " ", "_")
+}
+
+game_rec <- recipe(average ~ ., data = game_train) %>% 
+  update_role(name, new_role = "id") %>% 
+  step_tokenize(boardgamecategory, custom_token = split_category) %>% 
+  step_tokenfilter(boardgamecategory, max_tokens = 30) %>% 
+  step_tf(boardgamecategory)
+
+## check for work
+game_prep <- prep(game_rec)
+bake(game_prep, new_data = NULL) %>% str()
+```
+
+```{r}
+xgb_spec <- boost_tree(
+  trees = tune(),
+  mtry = tune(),
+  min_n = tune(),
+  learn_rate = 0.01
+) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+xgb_wf <- workflow(game_rec, xgb_spec)
+```
+
+```{r}
+library(finetune)
+doParallel::registerDoParallel()
+
+set.seed(234)
+xgb_game_rs <- tune_race_anova(
+  xgb_wf,
+  game_folds,
+  grid = 20,
+  control = control_race(verbose = TRUE)
+)
+```
+## Evaluate models
+```{r}
+plot_race(xgb_game_rs)
+show_best(xgb_game_rs, metric = "rmse")
+```
+
+```{r}
+xgb_last <- xgb_wf %>% 
+  finalize_workflow(select_best(xgb_game_rs, metric = "rmse")) %>% 
+  last_fit(game_split)
+
+xgb_last %>% collect_metrics()
+
+extract_workflow(xgb_last) 
+extract_fit_parsnip(xgb_last)
+```
+
+```{r}
+library(vip)
+
+xgb_fit <- extract_fit_parsnip(xgb_last)
+vip(xgb_fit, geom = "point", num_features = 12)
+```
+
+```{r}
+library(SHAPforxgboost)
+
+game_shap <- shap.prep(
+  xgb_model = extract_fit_engine(xgb_fit),
+  X_train = bake(
+    game_prep,
+    has_role("predictor"),
+    new_data = NULL,
+    composition = "matrix"
+  )
+)
+
+shap.plot.summary(game_shap)
+
+shap.plot.dependence(
+  game_shap,
+  x = "minage",
+  color_feature = "minplayers",
+  size0 = 1.2,
+  smooth = FALSE,
+  add_hist = TRUE
+)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
