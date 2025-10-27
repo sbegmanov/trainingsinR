@@ -44,4 +44,3 @@ rsconnect/
 # Ignore temp files
 .RData*
 .RDataTmp*
-.RDataTmp1
