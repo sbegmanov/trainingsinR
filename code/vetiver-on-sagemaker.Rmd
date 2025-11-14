@@ -1,0 +1,117 @@
+---
+title: "vetiver-on-sagemaker"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+## Train a model
+```{r}
+library(tidymodels)
+
+data("ames")
+glimpse(ames)
+```
+
+```{r}
+set.seed(123)
+ames_split <- ames %>% 
+  mutate(Sale_Price = log10(Sale_Price)) %>% 
+  mutate_if(is.integer, as.numeric) %>% 
+  initial_split(prop = 0.80, strata = Sale_Price)
+
+ames_train <- training(ames_split)
+ames_test <- testing(ames_split)
+
+rf_spec <-
+  rand_forest(trees = 1e3) %>% 
+  set_engine("ranger") %>% 
+  set_mode("regression")
+
+rf_wf <- workflow(
+  Sale_Price ~ Neighborhood + Gr_Liv_Area + Year_Built + Bldg_Type + Latitude + Longitude,
+  rf_spec
+)
+
+rf_fit <- rf_wf %>%
+  fit(data = ames_train)
+```
+## Create a deployable vetiver model  
+```{r}
+library(vetiver)
+
+v <- vetiver_model(rf_fit, "ames_pricing")
+```
+## Publish and version model on AWS S3
+```{r}
+library(pins)
+
+## existing bucket
+identifier <- "sagemaker-vetiver-demo"
+
+board <- board_s3(bucket = identifier)
+vetiver_pin_write(board, v)
+```
+## Build Docker container and deploy endpoint
+```{r}
+new_image_uri = vetiver_sm_build(board, "ames-pricing")
+```
+
+```{r}
+model_name <- vetiver_sm_model(new_image_uri)
+new_endpoint <- vetiver_sm_endpoint(model_name, "ml.t2.medium")
+```
+## Make predictions with your deployed model on sagemaker.aws
+```{r}
+ames_test %>% 
+  slice(1) %>% 
+  select(Neighborhood, Gr_Liv_Area, Year_Built, Bldg_Type, Latitude, Longitude) %>% 
+  jsonlite::toJSON(pretty = TRUE)
+
+# [
+#   {
+#     "Neighborhood": "North_Ames",
+#     "Gr_Liv_Area": 1500,
+#     "Year_Built": 1960,
+#     "Bldg_Type": "OneFam",
+#     "Latitude": 42.0,
+#     "Longitude": -93.6
+#   },
+#   {
+#     "Neighborhood": "North_Ames",
+#     "Gr_Liv_Area": 2100,
+#     "Year_Built": 1995,
+#     "Bldg_Type": "OneFam",
+#     "Latitude": 42.0,
+#     "Longitude": -93.6
+#   } 
+# ]
+```
+
+```{r}
+new_homes <- ames_test %>% slice_sample(n = 50)
+predict(new_endpoint, new_homes)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

@@ -16,6 +16,113 @@ worksgardner %>% count(artist_gender)
 ```
 
 ```{r}
-
+worksgardner %>% 
+  count(publication_year, artist_gender) %>% 
+  ggplot(aes(publication_year, n, fill = artist_gender)) +
+  geom_col() +
+  labs(x = NULL, y = "Number of works", fill = NULL)
 ```
+
+```{r}
+worksgardner %>% 
+  count(publication_year, artist_gender) %>% 
+  group_by(publication_year) %>% 
+  mutate(proportion = n / sum(n)) %>% 
+  ggplot(aes(publication_year, proportion, fill = artist_gender)) +
+  geom_col(alpha = 0.8) +
+  scale_y_continuous(labels = scales::percent) +
+  labs(x = NULL, y = "% of works", fill = NULL)
+```
+
+```{r}
+worksgardner %>% 
+  ggplot(aes(x = area_of_work_in_book, fill = artist_gender)) +
+  geom_histogram(bins = 15) +
+  facet_wrap(vars(artist_gender), scales = "free_y", ncol = 1) +
+  scale_x_log10() +
+  labs(fill = NULL)
+```
+
+```{r}
+worksgardner %>% 
+  mutate(publication_year = 10 * (publication_year %/% 10),
+         publication_year = factor(publication_year)) %>% 
+  ggplot(aes(publication_year, area_of_work_in_book, fill = artist_gender)) +
+  geom_boxplot(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(vars(artist_gender), ncol = 1) +
+  scale_y_log10() +
+  labs(x = NULL)
+```
+## Resampling to understand relationships
+```{r}
+works_subset <- worksgardner %>% 
+  filter(artist_gender %in% c("Male", "Female"),
+         area_of_work_in_book > 0) %>% 
+  mutate(area_of_work_in_book = log10(area_of_work_in_book))
+```
+
+```{r}
+single_model <- lm(area_of_work_in_book ~ artist_gender + publication_year,
+                   data = works_subset)
+
+summary(single_model)
+
+augment(single_model)
+```
+
+```{r}
+library(tidymodels)
+
+set.seed(123)
+folds <- bootstraps(works_subset, times = 1e3)
+
+analysis(folds$splits[[2]])
+```
+
+```{r}
+linear_coefs <- folds %>% 
+  mutate(
+    model = map(
+      splits,
+      ~lm(area_of_work_in_book ~ artist_gender + publication_year,
+          data = analysis(.x))
+    ),
+    coef_info = map(model, tidy)
+  )
+```
+
+```{r}
+linear_coefs %>% unnest(coef_info)
+```
+
+```{r}
+linear_coefs %>% 
+  slice_sample(n = 200) %>% 
+  mutate(augmented = map(model, augment)) %>% 
+  unnest(augmented) %>% 
+  ggplot(aes(publication_year, .fitted, color = artist_gender, group = id)) +
+  geom_line(alpha = 0.1, show.legend = FALSE) +
+  facet_wrap(vars(artist_gender))
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 

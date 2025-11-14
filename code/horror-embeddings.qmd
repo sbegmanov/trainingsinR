@@ -1,0 +1,152 @@
+---
+title: "horror-embeddings"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+set.seed(123)
+horror_movies <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2022/2022-11-01/horror_movies.csv') %>% 
+  filter(!is.na(overview), original_language == "en") %>% 
+  slice_sample(n = 1000)
+
+glimpse(horror_movies)
+```
+
+```{r}
+set.seed(234)
+sample(horror_movies$overview, size = 3)
+```
+## Text embeddings
+```{r}
+library(httr)
+library(jsonlite)
+library(purrr)
+
+# usethis::edit_r_environ()
+# Sys.getenv("OPENAI_API_KEY")
+Sys.setenv(OPENAI_API_KEY = "OPENAI_API_KEY")
+
+auth <- add_headers(Authorization = paste("Bearer", Sys.getenv("OPENAI_API_KEY")), "Content-Type" = "application/json")
+
+body <- list(
+  model = "text-embedding-ada-002", 
+  input = horror_movies$overview
+  )
+
+embeddings_url <- "https://api.openai.com/v1/embeddings"
+
+resp <- POST(
+  embeddings_url,
+  auth,
+  body = body,
+  encode = "json"
+)
+
+resp$status_code
+
+embeddings <- content(resp, as = "parsed", encoding = "UTF-8") %>% 
+  jsonlite::fromJSON(flatten = TRUE) %>% 
+  pluck("data", "embedding")
+```
+
+```{r}
+horror_embeddings <- horror_movies %>% 
+  mutate(embeddings = embeddings)
+
+horror_embeddings %>% 
+  select(id, original_title, embeddings)
+```
+
+```{r}
+embeddings_mat <- matrix(
+  unlist(horror_embeddings$embeddings),
+  ncol = 1536, byrow = TRUE
+)
+
+dim(embeddings_mat)
+```
+## Similarity
+```{r}
+embeddings_similarity <- embeddings_mat / sqrt(rowSums(embeddings_mat * embeddings))
+embeddings_similarity <- embeddings_similarity %*% t(embeddings_similarity)
+dim(embeddings_similarity)
+```
+
+```{r}
+horror_movies %>% 
+  slice(4) %>% 
+  select(title, overview) %>% View()
+```
+## Similar movies to Sharktopus 
+```{r}
+enframe(embeddings_similarity[4,], name = "movie", value = "similarity") %>% 
+  arrange(-similarity)
+```
+
+```{r}
+horrow_movies %>% 
+  slice(935, 379, 380) %>% 
+  select(title, overview)
+```
+## PCA
+```{r}
+set.seed(234)
+horror_pca <- irlba::prcomp_irlba(embeddings_mat, n = 32)
+summary(horror_pca)
+```
+
+```{r}
+library(plotly)
+
+augmented_pca <- as_tibble(horror_pca$x) %>% 
+  bind_cols(horror_movies)
+
+p <- augmented_pca %>% 
+  ggplot(aes(PC1, PC2, color = vote_average, text = title)) +
+  geom_point(size = 1.3, alpha = 0.8) +
+  scale_color_viridis_c()
+
+ggplotly(p, tooltip = "text")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

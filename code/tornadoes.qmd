@@ -1,0 +1,132 @@
+---
+title: "tornadoes"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+tornadoes <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-05-16/tornados.csv')
+
+glimpse(tornadoes)
+```
+
+```{r}
+tornadoes %>% 
+  ggplot(aes(mag, fill = fc)) +
+  geom_bar(position = position_dodge(preserve = "single")) +
+  scale_y_log10() +
+  labs(fill = "Estimated ?")
+```
+
+```{r}
+tornadoes %>% 
+  group_by(st) %>% 
+  summarise(mag = mean(mag, na.rm = TRUE), n = n()) %>% 
+  arrange(-mag)
+```
+
+```{r}
+tornadoes %>% 
+  filter(!is.na(mag)) %>% 
+  mutate(mag = factor(mag)) %>% 
+  ggplot(aes(mag, inj, fill = mag)) +
+  geom_boxplot(alpha = 0.4, show.legend = FALSE) +
+  scale_y_continuous(trans = scales::pseudo_log_trans(base = 10))
+```
+## Build a model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+tornado_split <- tornadoes %>% 
+  filter(!is.na(mag)) %>% 
+  initial_split(strata = mag)
+
+tornado_train <- training(tornado_split)
+tornado_test <- testing(tornado_split)
+
+set.seed(234)
+tornado_folds <- vfold_cv(tornado_train, strata = mag)
+```
+
+```{r}
+library(embed)
+
+tornado_rec <-
+  recipe(mag ~ date + st + inj + fat + len + wid, data = tornado_train) %>% 
+  step_lencode_glm(st, outcome = vars(mag)) %>% 
+  step_date(date, features = c("month", "year"), keep_original_cols = FALSE) %>% 
+  step_dummy(all_nominal_predictors())
+
+prep(tornado_rec) %>% bake(new_data = NULL) %>% glimpse()
+```
+
+```{r}
+xgb_spec <-
+  boost_tree(
+    trees = tune(),
+    min_n = tune(),
+    mtry = tune(),
+    learn_rate = 0.01
+  ) %>% 
+  set_engine("xgboost") %>% 
+  set_mode("regression")
+
+xgb_wf <- workflow(tornado_rec, xgb_spec)
+```
+
+```{r}
+library(finetune)
+doParallel::registerDoParallel()
+
+set.seed(345)
+xgb_rs <- tune_race_anova(
+  xgb_wf,
+  resamples = tornado_folds,
+  grid = 15,
+  control = control_race(verbose_elim = TRUE)
+)
+```
+## Evaluate and finalize model
+```{r}
+collect_metrics(xgb_rs)
+plot_race(xgb_rs)
+```
+
+```{r}
+tornado_fit <- xgb_wf %>% 
+  finalize_workflow(select_best(xgb_rs, metric = "rmse")) %>% 
+  last_fit(tornado_split)
+```
+
+```{r}
+collect_predictions(tornado_fit) %>% 
+  ggplot(aes(.pred)) +
+  geom_histogram()
+```
+
+```{r}
+collect_predictions(tornado_fit) %>% 
+  mutate(mag = factor(mag)) %>% 
+  ggplot(aes(mag, .pred, fill = mag)) +
+  geom_boxplot(alpha = 0.4, show.legend = FALSE)
+```
+
+```{r}
+library(vip)
+
+extract_workflow(tornado_fit) %>% 
+  extract_fit_parsnip() %>% 
+  vip(num_features = 10)
+```
+## Create a deployable model object
+```{r}
+library(vetiver)
+
+v <- extract_workflow(tornado_fit) %>% 
+  vetiver_model("tornado-xgb")
+```
+

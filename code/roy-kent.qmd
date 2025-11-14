@@ -1,0 +1,19 @@
+---
+title: "roy-kent"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(richmondway)
+
+data(richmondway)
+glimpse(richmondway)
+```
+
+```{r}
+
+```
+

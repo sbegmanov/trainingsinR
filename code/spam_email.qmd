@@ -1,0 +1,141 @@
+---
+title: "spam_email"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+spam <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-08-15/spam.csv')
+
+spam %>% count(yesno)
+glimpse(spam)
+```
+
+```{r}
+spam %>% ggplot(aes(crl.tot, fill = yesno, color = yesno)) +
+  geom_density(linewidth = 1.2, alpha = 0.2) +
+  scale_x_log10() +
+  labs(fill = "Spam ?", color = "Spam ?")
+```
+
+```{r}
+spam %>% 
+  pivot_longer(dollar:make) %>% 
+  mutate(yesno = if_else(yesno == "n", "Not spam", "Spam"),
+         value = if_else(value > 0, "Greater than zero", "Zero")) %>% 
+  ggplot(aes(value, fill = yesno)) +
+  geom_bar(alpha = 0.8) +
+  facet_wrap(vars(name)) +
+  theme(legend.position = "bottom") +
+  labs(fill = NULL, x = NULL)
+```
+## Build and compare models
+```{r}
+library(tidymodels)
+
+set.seed(123)
+spam_split <- spam %>% 
+  mutate(yesno = as.factor(yesno)) %>% 
+  initial_split(strata = yesno)
+
+spam_train <- training(spam_split)
+spam_test <- testing(spam_split)
+
+set.seed(234)
+spam_folds <- vfold_cv(spam_train, strata = yesno)
+```
+
+```{r}
+library(discrim)
+
+nb_spec <- naive_Bayes()
+nb_spec_tune <- naive_Bayes(smoothness = tune())
+
+mars_spec <- mars() %>% 
+  set_mode("classification")
+mars_spec_tune <- mars(num_terms = tune()) %>% 
+  set_mode("classification")
+
+rf_spec <- rand_forest(trees = 1e3) %>% 
+  set_mode("classification")
+rf_spec_tune <- rand_forest(trees = 1e3, mtry = tune(), min_n = tune()) %>% 
+  set_mode("classification")
+```
+
+```{r}
+spam_models <- workflow_set(
+  preproc = list(formula = yesno ~ .),
+  models = list(
+    nb = nb_spec,
+    mars = mars_spec,
+    rf = rf_spec,
+    nb_tune = nb_spec_tune,
+    mars_tune = mars_spec_tune,
+    rf_tune = rf_spec_tune
+  )
+)
+```
+
+```{r}
+set.seed(123)
+doParallel::registerDoParallel()
+
+spam_res <- spam_models %>% 
+  workflow_map(
+    "tune_grid",
+    resamples = spam_folds,
+    metrics = metric_set(accuracy, sensitivity, specificity)
+  )
+```
+
+```{r}
+autoplot(spam_res)
+rank_results(spam_res, rank_metric = "accuracy")
+```
+## Train and evaluate final model
+```{r}
+spam_wf <- workflow(
+  yesno ~ .,
+  rf_spec %>% set_engine("ranger", importance = "impurity")
+)
+
+spam_fit <- last_fit(spam_wf, spam_split)
+```
+
+```{r}
+collect_predictions(spam_fit) %>% 
+  conf_mat(yesno, .pred_class)
+```
+
+```{r}
+collect_predictions(spam_fit) %>% 
+  roc_curve(yesno, .pred_n) %>% 
+  autoplot()
+```
+
+```{r}
+library(vip)
+
+extract_workflow(spam_fit) %>% 
+  extract_fit_parsnip() %>% 
+  vip()
+```
+## Create a deployable model object
+```{r}
+library(vetiver)
+
+v <- extract_workflow(spam_fit) %>% 
+  vetiver_model("spam-email-rf")
+```
+
+```{r}
+library(plumber)
+
+pr() %>% 
+  vetiver_api(v) %>% 
+  pr_run()
+```
+

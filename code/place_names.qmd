@@ -1,0 +1,111 @@
+---
+title: "place_names"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+us_place_names <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-06-27/us_place_names.csv')
+
+glimpse(us_place_names)
+```
+
+```{r}
+place_counts <- us_place_names %>% 
+  count(feature_name, sort = TRUE) %>% 
+  filter(n > 1)
+```
+
+```{r}
+place_counts %>% 
+  ggplot(aes(n)) +
+  geom_histogram(bins = 12) +
+  scale_x_log10()
+```
+## Build a model
+```{r}
+library(tidymodels)
+
+set.seed(123)
+place_split <- initial_split(place_counts, strata = n)
+place_train <- training(place_split)
+place_test <- testing(place_split)
+```
+
+```{r}
+library(textrecipes)
+
+place_rec <- recipe(n ~ feature_name, data = place_train) %>% 
+  step_tokenize_bpe(feature_name, vocabulary_size = 200) %>% 
+  step_tokenfilter(feature_name, max_tokens = 100) %>% 
+  step_tf(feature_name)
+
+prep(place_rec) %>% bake(new_data = NULL) %>% glimpse()
+```
+
+```{r}
+library(poissonreg)
+
+poisson_wf <- workflow(place_rec, poisson_reg())
+poisson_fit <- fit(poisson_wf, place_train)
+```
+## Model results
+```{r}
+tidy(poisson_fit) %>% 
+  filter(term != "(Intercept)") %>% 
+  mutate(term = str_remove_all(term, "tf_feature_name_")) %>% 
+  slice_max(abs(estimate), n = 20) %>% 
+  arrange(-estimate)
+```
+
+```{r}
+place_train %>% filter(str_detect(feature_name, "Estates|wood")) %>% 
+  mutate(feature_name = case_when(
+    str_detect(feature_name, "wood") ~ "wood",
+    str_detect(feature_name, "Estates") ~ "estate"
+  )) %>% 
+  ggplot(aes(n, fill = feature_name)) +
+  geom_histogram(alpha = 0.8, position = "dodge", bins = 12) +
+  scale_x_log10() +
+  labs(
+    x = "Number of place name uses",
+    y = "Count",
+    fill = NULL
+  )
+```
+
+```{r}
+augment(poisson_fit, place_test) %>% 
+  poisson_log_loss(n, .pred)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

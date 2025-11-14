@@ -1,0 +1,60 @@
+---
+title: "gpt-detectors"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+library(detectors)
+
+detectors %>% count(model)
+detectors %>% count(detector)
+detectors %>% count(native, kind, .pred_class)
+```
+
+```{r}
+detectors %>% 
+  filter(!is.na(native)) %>% 
+  mutate(native = case_when(
+    native == "Yes" ~ "Native English writer",
+    native == "No" ~ "Non-native English writer"
+  )) %>% 
+  ggplot(aes(.pred_AI, fill = native)) +
+  geom_histogram(bins = 40, show.legend = FALSE) +
+  facet_wrap(vars(native), scales = "free_y", nrow = 2)
+```
+## Metrics that use a predicted class
+```{r}
+library(yardstick)
+
+detectors %>% conf_mat(kind, .pred_class)
+detectors %>% accuracy(kind, .pred_class)
+
+detectors %>% group_by(detector) %>% accuracy(kind, .pred_class)
+detectors %>% group_by(native) %>% accuracy(kind, .pred_class)
+
+detectors %>% sensitivity(kind, .pred_class) # True positive rate
+detectors %>% group_by(detector) %>% sensitivity(kind, .pred_class)
+detectors %>% group_by(native) %>% sensitivity(kind, .pred_class)
+
+detectors %>% filter(!is.na(native)) %>% conf_mat(kind, .pred_class)
+
+detectors %>% group_by(native) %>% specificity(kind, .pred_class) # True negative rate
+```
+## Metrics that use a predicted probability
+```{r}
+detectors %>% roc_curve(kind, .pred_AI) %>% autoplot()
+detectors %>% group_by(detector) %>% roc_curve(kind, .pred_AI) %>% autoplot()
+detectors %>% group_by(detector) %>% roc_auc(kind, .pred_AI)
+detectors %>% group_by(native) %>% roc_curve(kind, .pred_AI)
+```
+
+```{r}
+detectors %>% mn_log_loss(kind, .pred_AI)
+detectors %>% group_by(detector) %>% mn_log_loss(kind, .pred_AI) %>% arrange(.estimate)
+
+detectors %>% group_by(native) %>% mn_log_loss(kind, .pred_AI)
+```
+
