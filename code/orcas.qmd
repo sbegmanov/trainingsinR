@@ -1,0 +1,34 @@
+---
+title: "Untitled"
+format: html
+---
+
+```{r}
+library(tidyverse)
+library(orcas)
+
+data(cwr_tidy)
+cwr_tidy %>% View()
+```
+
+```{r}
+cwr_tidy %>% 
+    count(location, sort = TRUE) %>% 
+    View()
+```
+
+
+```{r}
+cwr_tidy %>% 
+    mutate(encounter_interval = int_length(interval(begin_time, end_time))) %>% 
+    ggplot(aes(begin_longitude, begin_latitude, color = log(encounter_interval))) +
+    geom_point()
+```
+
+
+```{r}
+cwr_tidy %>% 
+    ggplot() +
+    geom_point(aes(begin_longitude, begin_latitude), color = "midnightblue") +
+    geom_point(aes(end_longitude, end_latitude), color = "aquamarine")
+```
