@@ -11,9 +11,59 @@ library(richmondway)
 
 data(richmondway)
 glimpse(richmondway)
+
+richmondway %>% count(Character)
 ```
 
 ```{r}
-
+richmondway %>% 
+  ggplot(aes(F_count_RK, fill = Dating_flag)) +
+  geom_histogram(position = "identity", bins = 7, alpha = 0.7) +
+  scale_fill_brewer(palette = "Dark2")
 ```
+
+```{r}
+richmondway %>% 
+  ggplot(aes(F_count_RK, fill = Coaching_flag)) +
+  geom_histogram(position = "identity", bins = 7, alpha = 0.7) +
+  scale_fill_brewer(palette = "Dark2")
+```
+## Bootstamp resampling for Poisson regression
+-Poisson regression
+-Bootstrap confidence intervals
+```{r}
+library(rsample)
+
+set.seed(123)
+poisson_intervals <- reg_intervals(
+  F_count_RK ~ Dating_flag + Coaching_flag,
+  data = richmondway,
+  model_fn = "glm",
+  family = "poisson",
+  keep_reps = TRUE
+)
+```
+
+```{r}
+poisson_intervals %>% 
+  mutate(term = str_remove(term, "_flagYes")) %>% 
+  unnest(.replicates) %>% 
+  ggplot(aes(estimate, fill = term)) +
+  geom_vline(xintercept = 0, linewidth = 1.5, lty = 2, color = "gray50") +
+  geom_histogram(alpha = 0.8, show.legend = FALSE) +
+  facet_wrap(vars(term)) +
+  scale_fill_brewer(palette = "Accent")
+```
+
+
+
+
+
+
+
+
+
+
+
+
 

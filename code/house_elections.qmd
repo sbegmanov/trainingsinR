@@ -1,0 +1,89 @@
+---
+title: "house_elections"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+house <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-11-07/house.csv')
+
+glimpse(house)
+```
+
+```{r}
+house %>% count(party, sort = TRUE)
+
+house %>% filter(party %in% c("DEMOCRAT", "REPUBLICAN")) %>% 
+  ggplot(aes(candidatevotes / totalvotes, fill = party)) +
+  geom_histogram(position = "identity", bins = 40, alpha = 0.7) +
+  scale_x_continuous(labels = scales::percent_format()) +
+  labs(x = "% of total votes", y = "Number of elections", fill = NULL)
+```
+
+```{r}
+house %>% 
+  filter(party %in% c("DEMOCRAT", "REPUBLICAN")) %>% 
+  ggplot(aes(year, candidatevotes / totalvotes, fill = factor(year))) +
+  geom_boxplot(alpha = 0.8, show.legend = FALSE) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  scale_fill_viridis_d() +
+  labs(x = NULL, y = "% of total votes", fill = NULL)
+```
+## Logistics regression model
+```{r}
+house_subset <- house %>% filter(party %in% c("DEMOCRAT", "REPUBLICAN"))
+
+house_mod <- glm(cbind(candidatevotes, totalvotes - candidatevotes + 1) ~ 
+                   party + year + state_po,
+                 data = house_subset, family = binomial())
+
+summary(house_mod)
+```
+
+```{r}
+library(broom)
+tidy(house_mod)
+
+new_data <- crossing(party = c("DEMOCRAT", "REPUBLICAN"),
+                     state_po = unique(house_subset$state_po),
+                     year = 1975:2022)
+
+augment(house_mod, newdata = new_data, type.predict = "response") %>% 
+  mutate(group = paste(party, state_po, sep = "_")) %>% 
+  ggplot(aes(year, .fitted, group = group, color = party)) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", alpha = 0.5, size = 2, color = "gray50") +
+  geom_line(alpha = 0.4, linewidth = 1.4, show.legend = FALSE) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  facet_wrap(vars(party)) +
+  labs(x = NULL, y = "% of total votes", color = NULL)
+```
+
+```{r}
+house_interact <- glm(cbind(candidatevotes, totalvotes - candidatevotes + 1) ~ 
+                        party * year + state_po, data = house_subset, family = binomial()) 
+
+augment(house_interact, newdata = new_data, type.predict = "response") %>% 
+  mutate(group = paste(party, state_po, sep = "_")) %>% 
+  ggplot(aes(year, .fitted, group = group, color = party)) +
+  geom_hline(yintercept = 0.5, linetype = "dashed", alpha = 0.5, size = 2, color = "gray50") +
+  geom_line(alpha = 0.4, size = 1.4, show.legend = FALSE) +
+  scale_y_continuous(labels = scales::percent_format()) +
+  facet_wrap(vars(party)) +
+  labs(x = NULL, y = "% of total votes", color = NULL)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+

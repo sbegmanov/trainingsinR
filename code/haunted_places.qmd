@@ -1,0 +1,88 @@
+---
+title: "haunted_places"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+haunted_places <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2023/2023-10-10/haunted_places.csv')
+```
+
+```{r}
+haunted_places %>% count(state, sort = TRUE)
+
+haunted_places %>% count(location, sort = TRUE)
+haunted_places %>% slice_sample(n = 10) %>% select(location)
+```
+
+```{r}
+library(tidytext)
+
+haunted_places %>% 
+  unnest_tokens(word, location) %>% 
+  count(word, sort = TRUE)
+```
+## Weighted log odds
+```{r}
+haunted_counts <- haunted_places %>% 
+  mutate(location = str_to_lower(location)) %>% 
+  mutate(location = case_when(
+    str_detect(location, "cemetery|graveyard") ~ "cemetery",
+    str_detect(location, "school") ~ "school",
+    .default = "other"
+  )) %>% 
+  count(state_abbrev, location)
+
+haunted_counts %>% count(location)
+```
+
+```{r}
+library(tidylo)
+
+haunted_counts %>% 
+  bind_log_odds(location, state_abbrev, n) %>% 
+  group_by(location) %>% 
+  slice_max(log_odds_weighted, n = 5) %>% 
+  mutate(state_abbrev = reorder(state_abbrev, log_odds_weighted)) %>% 
+  ggplot(aes(log_odds_weighted, state_abbrev, fill = location)) +
+  geom_col(show.legend = FALSE) +
+  facet_wrap(vars(location), scales = "free") +
+  scale_fill_brewer(palette = "Dark2") +
+  labs(x = "Weighted log odds (emperical Bayes)", y = NULL)
+```
+
+```{r}
+haunted_places %>% 
+  filter(state_abbrev == "DC") %>% 
+  slice_sample(n = 10) %>% 
+  select(location)
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

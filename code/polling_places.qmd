@@ -1,0 +1,96 @@
+---
+title: "polling_places"
+format: html
+editor_options: 
+  chunk_output_type: console
+---
+
+```{r}
+library(tidyverse)
+
+polling_places <- read_csv('https://raw.githubusercontent.com/rfordatascience/tidytuesday/master/data/2024/2024-01-16/polling_places.csv')
+
+polling_places %>% count(election_date) %>% mutate(month = month(election_date))
+polling_places %>% count(state, sort = TRUE) 
+```
+
+```{r}
+polling_places %>% 
+  filter(month(election_date) == 11) %>% 
+  count(state, election_date) %>% 
+  mutate(state = fct_reorder(state, n)) %>% 
+  ggplot(aes(election_date, n, color = state)) +
+  geom_line(alpha = 0.8, linewidth = 1.2, show.legend = FALSE) +
+  scale_colour_viridis_d() +
+  scale_y_log10() +
+  labs(x = NULL, y = "Number of polling places per state")
+```
+## Choose how to measure change
+```{r}
+by_state <- polling_places %>% 
+  filter(month(election_date) == 11) %>% 
+  count(state, election_date)
+
+by_state %>% filter(state == "AR")
+```
+
+```{r}
+total_change <- by_state %>% 
+  group_by(state) %>% 
+  mutate(change = n - lag(n)) %>% 
+  filter(n() > 1) %>% 
+  summarize(change = sum(change, na.rm = TRUE) / first(n)) # delete by first in group
+
+summary(total_change$change)
+```
+## Mapping change in polling places
+```{r}
+us_states <- as_tibble(map_data("state"))
+limits <- max(abs(total_change$change)) * c(-1, 1)
+
+us_states %>% 
+  inner_join(tibble(state = state.abb, region = str_to_lower(state.name))) %>% left_join(total_change) %>% 
+  ggplot(aes(x = long, y = lat, group = group, fill = change)) +
+  geom_polygon(color = "black", linewidth = 0.1) +
+  coord_map() +
+  scale_fill_distiller(palette = "RdYlBu", direction = 1, na.value = "gray95", limits = limits, label = scales::label_percent()) +
+  labs(fill = "Total change")
+```
+
+```{r}
+by_state %>% filter(state == "MD")
+by_state %>% filter(state == "ND")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
